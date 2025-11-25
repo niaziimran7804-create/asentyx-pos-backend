@@ -7,10 +7,12 @@ namespace POS.Api.Services
     public class ProductService : IProductService
     {
         private readonly ApplicationDbContext _context;
+        private readonly IEmailService _emailService;
 
-        public ProductService(ApplicationDbContext context)
+        public ProductService(ApplicationDbContext context, IEmailService emailService)
         {
             _context = context;
+            _emailService = emailService;
         }
 
         public async Task<IEnumerable<ProductDto>> GetAllProductsAsync(string? searchKey = null)
@@ -45,7 +47,9 @@ namespace POS.Api.Services
                 ProductColor = p.ProductColor,
                 ProductWeight = p.ProductWeight,
                 ProductUnitStock = p.ProductUnitStock,
-                BrandName = p.Brand?.BrandName
+                StockThreshold = p.StockThreshold,
+                BrandName = p.Brand?.BrandName,
+                ProductImageBase64 = p.ProductImage != null ? Convert.ToBase64String(p.ProductImage) : null
             });
         }
 
@@ -74,7 +78,9 @@ namespace POS.Api.Services
                 ProductColor = product.ProductColor,
                 ProductWeight = product.ProductWeight,
                 ProductUnitStock = product.ProductUnitStock,
-                BrandName = product.Brand?.BrandName
+                StockThreshold = product.StockThreshold,
+                BrandName = product.Brand?.BrandName,
+                ProductImageBase64 = product.ProductImage != null ? Convert.ToBase64String(product.ProductImage) : null
             };
         }
 
@@ -94,7 +100,11 @@ namespace POS.Api.Services
                 ProductSize = createProductDto.ProductSize,
                 ProductColor = createProductDto.ProductColor,
                 ProductWeight = createProductDto.ProductWeight,
-                ProductUnitStock = createProductDto.ProductUnitStock
+                ProductUnitStock = createProductDto.ProductUnitStock,
+                StockThreshold = createProductDto.StockThreshold,
+                ProductImage = !string.IsNullOrEmpty(createProductDto.ProductImageBase64) 
+                    ? Convert.FromBase64String(createProductDto.ProductImageBase64) 
+                    : null
             };
 
             _context.Products.Add(product);
@@ -121,6 +131,13 @@ namespace POS.Api.Services
             product.ProductColor = updateProductDto.ProductColor;
             product.ProductWeight = updateProductDto.ProductWeight;
             product.ProductUnitStock = updateProductDto.ProductUnitStock;
+            product.StockThreshold = updateProductDto.StockThreshold;
+
+            // Only update image if a new one is provided
+            if (!string.IsNullOrEmpty(updateProductDto.ProductImageBase64))
+            {
+                product.ProductImage = Convert.FromBase64String(updateProductDto.ProductImageBase64);
+            }
 
             await _context.SaveChangesAsync();
             return true;
@@ -150,6 +167,67 @@ namespace POS.Api.Services
         public async Task<int> GetUnavailableProductsAsync()
         {
             return await _context.Products.CountAsync(p => p.ProductStatus == "NO");
+        }
+
+        public async Task<bool> DeductInventoryAsync(int productId, int quantity)
+        {
+            var product = await _context.Products.FindAsync(productId);
+            if (product == null)
+                return false;
+
+            // Check if sufficient stock is available
+            if (product.ProductUnitStock < quantity)
+            {
+                throw new InvalidOperationException($"Insufficient stock for product '{product.ProductName}'. Available: {product.ProductUnitStock}, Requested: {quantity}");
+            }
+
+            // Store previous stock for comparison
+            var previousStock = product.ProductUnitStock;
+
+            product.ProductUnitStock -= quantity;
+
+            // Update product status if stock reaches zero
+            if (product.ProductUnitStock == 0)
+            {
+                product.ProductStatus = "NO";
+            }
+
+            await _context.SaveChangesAsync();
+
+            // Check if stock has fallen below threshold and send email notification
+            if (product.ProductUnitStock <= product.StockThreshold)
+            {
+                // Stock just crossed the threshold, send alert
+                try
+                {
+                    await _emailService.SendLowStockAlertAsync(product.ProductName, product.ProductUnitStock, product.StockThreshold);
+                }
+                catch (Exception ex)
+                {
+                    // Log error but don't fail the inventory deduction
+                    System.Diagnostics.Debug.WriteLine($"Failed to send low stock alert for product {product.ProductName}: {ex.Message}");
+                }
+            }
+
+            return true;
+        }
+
+        public async Task<bool> RestoreInventoryAsync(int productId, int quantity)
+        {
+            var product = await _context.Products.FindAsync(productId);
+            if (product == null)
+                return false;
+
+            product.ProductUnitStock += quantity;
+
+            // Update product status if it was out of stock
+            if (product.ProductStatus == "NO" && product.ProductUnitStock > 0)
+            {
+                product.ProductStatus = "YES";
+            }
+
+            await _context.SaveChangesAsync();
+            return true;
         }
     }
 }

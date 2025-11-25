@@ -7,10 +7,12 @@ namespace POS.Api.Services
     public class ExpenseService : IExpenseService
     {
         private readonly ApplicationDbContext _context;
+        private readonly IAccountingService _accountingService;
 
-        public ExpenseService(ApplicationDbContext context)
+        public ExpenseService(ApplicationDbContext context, IAccountingService accountingService)
         {
             _context = context;
+            _accountingService = accountingService;
         }
 
         public async Task<IEnumerable<ExpenseDto>> GetAllExpensesAsync()
@@ -40,7 +42,7 @@ namespace POS.Api.Services
             };
         }
 
-        public async Task<ExpenseDto> CreateExpenseAsync(CreateExpenseDto createExpenseDto)
+        public async Task<ExpenseDto> CreateExpenseAsync(CreateExpenseDto createExpenseDto, string createdBy)
         {
             var expense = new Models.Expense
             {
@@ -51,6 +53,16 @@ namespace POS.Api.Services
 
             _context.Expenses.Add(expense);
             await _context.SaveChangesAsync();
+
+            // Create accounting entry for the expense
+            try
+            {
+                await _accountingService.CreateExpenseEntryAsync(expense.ExpenseId, createdBy);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to create accounting entry for expense {expense.ExpenseId}: {ex.Message}");
+            }
 
             return await GetExpenseByIdAsync(expense.ExpenseId) ?? new ExpenseDto();
         }

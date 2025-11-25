@@ -55,6 +55,28 @@ namespace POS.Api.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "ShopConfigurations",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    ShopName = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: false),
+                    ShopAddress = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: true),
+                    ShopPhone = table.Column<string>(type: "nvarchar(20)", maxLength: 20, nullable: true),
+                    ShopEmail = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: true),
+                    ShopWebsite = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: true),
+                    TaxId = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: true),
+                    FooterMessage = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: true),
+                    HeaderMessage = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: true),
+                    Logo = table.Column<byte[]>(type: "varbinary(max)", nullable: true),
+                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_ShopConfigurations", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "Users",
                 columns: table => new
                 {
@@ -223,7 +245,11 @@ namespace POS.Api.Migrations
                     Status = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false),
                     TotalAmount = table.Column<decimal>(type: "decimal(18,2)", nullable: false),
                     OrderStatus = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false),
-                    PaymentMethod = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false)
+                    PaymentMethod = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false),
+                    CustomerFullName = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: true),
+                    CustomerPhone = table.Column<string>(type: "nvarchar(20)", maxLength: 20, nullable: true),
+                    CustomerAddress = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: true),
+                    CustomerEmail = table.Column<string>(type: "nvarchar(255)", maxLength: 255, nullable: true)
                 },
                 constraints: table =>
                 {
@@ -242,6 +268,62 @@ namespace POS.Api.Migrations
                     table.ForeignKey(
                         name: "FK_Orders_Users_Id",
                         column: x => x.Id,
+                        principalTable: "Users",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "Invoices",
+                columns: table => new
+                {
+                    InvoiceId = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    OrderId = table.Column<int>(type: "int", nullable: false),
+                    InvoiceNumber = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false),
+                    InvoiceDate = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    DueDate = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    Status = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_Invoices", x => x.InvoiceId);
+                    table.ForeignKey(
+                        name: "FK_Invoices_Orders_OrderId",
+                        column: x => x.OrderId,
+                        principalTable: "Orders",
+                        principalColumn: "OrderId",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "OrderHistories",
+                columns: table => new
+                {
+                    OrderHistoryId = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    OrderId = table.Column<int>(type: "int", nullable: false),
+                    UserId = table.Column<int>(type: "int", nullable: false),
+                    PreviousStatus = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: true),
+                    NewStatus = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: true),
+                    PreviousOrderStatus = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: true),
+                    NewOrderStatus = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: true),
+                    Action = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false),
+                    Notes = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: true),
+                    ChangedDate = table.Column<DateTime>(type: "datetime2", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_OrderHistories", x => x.OrderHistoryId);
+                    table.ForeignKey(
+                        name: "FK_OrderHistories_Orders_OrderId",
+                        column: x => x.OrderId,
+                        principalTable: "Orders",
+                        principalColumn: "OrderId",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_OrderHistories_Users_UserId",
+                        column: x => x.UserId,
                         principalTable: "Users",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Restrict);
@@ -282,6 +364,21 @@ namespace POS.Api.Migrations
                 column: "VendorId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_Invoices_OrderId",
+                table: "Invoices",
+                column: "OrderId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_OrderHistories_OrderId",
+                table: "OrderHistories",
+                column: "OrderId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_OrderHistories_UserId",
+                table: "OrderHistories",
+                column: "UserId");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_OrderProductMaps_OrderId",
                 table: "OrderProductMaps",
                 column: "OrderId");
@@ -317,6 +414,12 @@ namespace POS.Api.Migrations
                 column: "MainCategoryId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_ShopConfigurations_Id",
+                table: "ShopConfigurations",
+                column: "Id",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "IX_ThirdCategories_SecondCategoryId",
                 table: "ThirdCategories",
                 column: "SecondCategoryId");
@@ -334,7 +437,16 @@ namespace POS.Api.Migrations
                 name: "Expenses");
 
             migrationBuilder.DropTable(
+                name: "Invoices");
+
+            migrationBuilder.DropTable(
+                name: "OrderHistories");
+
+            migrationBuilder.DropTable(
                 name: "OrderProductMaps");
+
+            migrationBuilder.DropTable(
+                name: "ShopConfigurations");
 
             migrationBuilder.DropTable(
                 name: "Orders");

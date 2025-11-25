@@ -16,7 +16,9 @@ namespace POS.Api.DTOs
         public string? ProductColor { get; set; }
         public decimal ProductWeight { get; set; }
         public int ProductUnitStock { get; set; }
+        public int StockThreshold { get; set; }
         public string? BrandName { get; set; }
+        public string? ProductImageBase64 { get; set; }
     }
 
     public class CreateProductDto
@@ -34,6 +36,8 @@ namespace POS.Api.DTOs
         public string? ProductColor { get; set; }
         public decimal ProductWeight { get; set; }
         public int ProductUnitStock { get; set; }
+        public int StockThreshold { get; set; } = 10;
+        public string? ProductImageBase64 { get; set; }
     }
 
     public class UpdateProductDto
@@ -50,6 +54,8 @@ namespace POS.Api.DTOs
         public string? ProductColor { get; set; }
         public decimal ProductWeight { get; set; }
         public int ProductUnitStock { get; set; }
+        public int StockThreshold { get; set; }
+        public string? ProductImageBase64 { get; set; }
     }
 }
 

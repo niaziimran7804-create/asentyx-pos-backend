@@ -8,11 +8,15 @@ namespace POS.Api.Services
     {
         private readonly ApplicationDbContext _context;
         private readonly IInvoiceService _invoiceService;
+        private readonly IAccountingService _accountingService;
+        private readonly IProductService _productService;
 
-        public OrderService(ApplicationDbContext context, IInvoiceService invoiceService)
+        public OrderService(ApplicationDbContext context, IInvoiceService invoiceService, IAccountingService accountingService, IProductService productService)
         {
             _context = context;
             _invoiceService = invoiceService;
+            _accountingService = accountingService;
+            _productService = productService;
         }
 
         public async Task<IEnumerable<OrderDto>> GetAllOrdersAsync()
@@ -109,7 +113,7 @@ namespace POS.Api.Services
             _context.Orders.Add(order);
             await _context.SaveChangesAsync();
 
-            // Add order product maps
+            // Add order product maps and deduct inventory
             foreach (var item in createOrderDto.Items)
             {
                 var orderProductMap = new Models.OrderProductMap
@@ -121,6 +125,19 @@ namespace POS.Api.Services
                     TotalPrice = item.Quantity * item.UnitPrice
                 };
                 _context.OrderProductMaps.Add(orderProductMap);
+
+                // Deduct inventory when order is created
+                try
+                {
+                    await _productService.DeductInventoryAsync(item.ProductId, item.Quantity);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    // Rollback the order if insufficient stock
+                    _context.Orders.Remove(order);
+                    await _context.SaveChangesAsync();
+                    throw new InvalidOperationException($"Order creation failed: {ex.Message}");
+                }
             }
 
             await _context.SaveChangesAsync();
@@ -196,7 +213,10 @@ namespace POS.Api.Services
 
         public async Task<bool> UpdateOrderStatusAsync(int id, UpdateOrderStatusDto updateDto, int userId)
         {
-            var order = await _context.Orders.FindAsync(id);
+            var order = await _context.Orders
+                .Include(o => o.OrderProductMaps)
+                .FirstOrDefaultAsync(o => o.OrderId == id);
+            
             if (order == null)
                 return false;
 
@@ -210,6 +230,23 @@ namespace POS.Api.Services
             // Store previous values for history
             var previousStatus = order.Status;
             var previousOrderStatus = order.OrderStatus;
+
+            // Restore inventory when order is cancelled
+            if ((updateDto.Status == "Cancelled" || updateDto.OrderStatus == "Cancelled") && 
+                (previousStatus != "Cancelled" && previousOrderStatus != "Cancelled"))
+            {
+                foreach (var orderProductMap in order.OrderProductMaps)
+                {
+                    try
+                    {
+                        await _productService.RestoreInventoryAsync(orderProductMap.ProductId, orderProductMap.Quantity);
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Failed to restore inventory for product {orderProductMap.ProductId}: {ex.Message}");
+                    }
+                }
+            }
 
             // Only update status fields
             order.Status = updateDto.Status;
@@ -232,6 +269,39 @@ namespace POS.Api.Services
                 ChangedDate = DateTime.UtcNow
             };
             _context.OrderHistories.Add(history);
+
+            // Get user info for accounting entries
+            var user = await _context.Users.FindAsync(userId);
+            var username = user != null ? $"{user.FirstName} {user.LastName}" : "System";
+
+            // Create accounting entry for sale when order is paid
+            if ((updateDto.Status == "Paid" || updateDto.OrderStatus == "Paid") && 
+                (previousStatus != "Paid" && previousOrderStatus != "Paid"))
+            {
+                try
+                {
+                    await _accountingService.CreateSaleEntryFromOrderAsync(order.OrderId, username);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Failed to create accounting entry for order {order.OrderId}: {ex.Message}");
+                }
+            }
+
+            // Create accounting entry for refund when order is cancelled
+            if ((updateDto.Status == "Cancelled" || updateDto.OrderStatus == "Cancelled") && 
+                (previousStatus != "Cancelled" && previousOrderStatus != "Cancelled") &&
+                (previousStatus == "Paid" || previousOrderStatus == "Paid"))
+            {
+                try
+                {
+                    await _accountingService.CreateRefundEntryFromOrderAsync(order.OrderId, username);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Failed to create refund entry for order {order.OrderId}: {ex.Message}");
+                }
+            }
 
             // Update invoice status when order is paid
             if (updateDto.Status == "Paid" || updateDto.OrderStatus == "Paid")
@@ -277,14 +347,36 @@ namespace POS.Api.Services
                 throw new ArgumentException("OrderStatus must be either 'Paid', 'Pending', or 'Cancelled'");
 
             var orders = await _context.Orders
+                .Include(o => o.OrderProductMaps)
                 .Where(o => bulkUpdateDto.OrderIds.Contains(o.OrderId))
                 .ToListAsync();
+
+            // Get user info for accounting entries
+            var user = await _context.Users.FindAsync(userId);
+            var username = user != null ? $"{user.FirstName} {user.LastName}" : "System";
 
             int updatedCount = 0;
             foreach (var order in orders)
             {
                 var previousStatus = order.Status;
                 var previousOrderStatus = order.OrderStatus;
+
+                // Restore inventory when order is cancelled
+                if ((bulkUpdateDto.Status == "Cancelled" || bulkUpdateDto.OrderStatus == "Cancelled") && 
+                    (previousStatus != "Cancelled" && previousOrderStatus != "Cancelled"))
+                {
+                    foreach (var orderProductMap in order.OrderProductMaps)
+                    {
+                        try
+                        {
+                            await _productService.RestoreInventoryAsync(orderProductMap.ProductId, orderProductMap.Quantity);
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Failed to restore inventory for product {orderProductMap.ProductId}: {ex.Message}");
+                        }
+                    }
+                }
 
                 order.Status = bulkUpdateDto.Status;
                 order.OrderStatus = bulkUpdateDto.OrderStatus;
@@ -305,6 +397,35 @@ namespace POS.Api.Services
                     ChangedDate = DateTime.UtcNow
                 };
                 _context.OrderHistories.Add(history);
+
+                // Create accounting entry for sale when order is paid
+                if ((bulkUpdateDto.Status == "Paid" || bulkUpdateDto.OrderStatus == "Paid") && 
+                    (previousStatus != "Paid" && previousOrderStatus != "Paid"))
+                {
+                    try
+                    {
+                        await _accountingService.CreateSaleEntryFromOrderAsync(order.OrderId, username);
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Failed to create accounting entry for order {order.OrderId}: {ex.Message}");
+                    }
+                }
+
+                // Create accounting entry for refund when order is cancelled
+                if ((bulkUpdateDto.Status == "Cancelled" || bulkUpdateDto.OrderStatus == "Cancelled") && 
+                    (previousStatus != "Cancelled" && previousOrderStatus != "Cancelled") &&
+                    (previousStatus == "Paid" || previousOrderStatus == "Paid"))
+                {
+                    try
+                    {
+                        await _accountingService.CreateRefundEntryFromOrderAsync(order.OrderId, username);
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Failed to create refund entry for order {order.OrderId}: {ex.Message}");
+                    }
+                }
 
                 // Update invoice status when order is paid
                 if (bulkUpdateDto.Status == "Paid" || bulkUpdateDto.OrderStatus == "Paid")
@@ -384,5 +505,16 @@ namespace POS.Api.Services
         }
     }
 }
+
+
+
+
+
+
+
+
+
+
+
 
 

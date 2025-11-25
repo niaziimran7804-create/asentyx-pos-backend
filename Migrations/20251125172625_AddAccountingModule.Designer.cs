@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using POS.Api.Data;
 
@@ -11,9 +12,11 @@ using POS.Api.Data;
 namespace POS.Api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251125172625_AddAccountingModule")]
+    partial class AddAccountingModule
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -436,9 +439,6 @@ namespace POS.Api.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
-                    b.Property<byte[]>("ProductImage")
-                        .HasColumnType("varbinary(max)");
-
                     b.Property<decimal>("ProductMSRP")
                         .HasColumnType("decimal(18,2)");
 
@@ -466,9 +466,6 @@ namespace POS.Api.Migrations
 
                     b.Property<decimal>("ProductWeight")
                         .HasColumnType("decimal(18,2)");
-
-                    b.Property<int>("StockThreshold")
-                        .HasColumnType("int");
 
                     b.HasKey("ProductId");
 

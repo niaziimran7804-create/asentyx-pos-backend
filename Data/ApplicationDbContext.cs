@@ -24,6 +24,8 @@ namespace POS.Api.Data
         public DbSet<Invoice> Invoices { get; set; }
         public DbSet<ShopConfiguration> ShopConfigurations { get; set; }
         public DbSet<OrderHistory> OrderHistories { get; set; }
+        public DbSet<AccountingEntry> AccountingEntries { get; set; }
+        public DbSet<DailySales> DailySales { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -106,6 +108,23 @@ namespace POS.Api.Data
                 .WithMany()
                 .HasForeignKey(oh => oh.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // Accounting indexes
+            modelBuilder.Entity<AccountingEntry>()
+                .HasIndex(ae => ae.EntryDate);
+
+            modelBuilder.Entity<AccountingEntry>()
+                .HasIndex(ae => ae.EntryType);
+
+            modelBuilder.Entity<AccountingEntry>()
+                .HasIndex(ae => ae.PaymentMethod);
+
+            modelBuilder.Entity<AccountingEntry>()
+                .HasIndex(ae => ae.CreatedBy);
+
+            modelBuilder.Entity<DailySales>()
+                .HasIndex(ds => ds.SaleDate)
+                .IsUnique();
         }
     }
 }
