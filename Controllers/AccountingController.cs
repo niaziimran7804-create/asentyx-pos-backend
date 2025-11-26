@@ -184,77 +184,21 @@ namespace POS.Api.Controllers
         /// </summary>
         [HttpGet("sales-graph")]
         public async Task<ActionResult<SalesGraphDto>> GetSalesGraph(
-            [FromQuery] DateTime? startDate = null,
-            [FromQuery] DateTime? endDate = null)
+            [FromQuery] DateTime startDate,
+            [FromQuery] DateTime endDate)
         {
             try
             {
-                var start = startDate ?? DateTime.UtcNow.AddDays(-30);
-                var end = endDate ?? DateTime.UtcNow;
-
-                var result = await _accountingService.GetSalesGraphAsync(start, end);
-                return Ok(result);
+                var graphData = await _accountingService.GetSalesGraphAsync(startDate, endDate);
+                return Ok(graphData);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { error = ex.Message });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new
-                {
-                    error = "Internal server error",
-                    message = ex.Message,
-                    statusCode = 500,
-                    timestamp = DateTime.UtcNow
-                });
-            }
-        }
-
-        /// <summary>
-        /// Get payment methods summary
-        /// </summary>
-        [HttpGet("payment-methods")]
-        public async Task<ActionResult<List<PaymentMethodSummaryDto>>> GetPaymentMethods(
-            [FromQuery] DateTime? startDate = null,
-            [FromQuery] DateTime? endDate = null)
-        {
-            try
-            {
-                var result = await _accountingService.GetPaymentMethodsSummaryAsync(startDate, endDate);
-                return Ok(result);
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new
-                {
-                    error = "Internal server error",
-                    message = ex.Message,
-                    statusCode = 500,
-                    timestamp = DateTime.UtcNow
-                });
-            }
-        }
-
-        /// <summary>
-        /// Get top performing products
-        /// </summary>
-        [HttpGet("top-products")]
-        public async Task<ActionResult<List<TopProductDto>>> GetTopProducts(
-            [FromQuery] int limit = 10,
-            [FromQuery] DateTime? startDate = null,
-            [FromQuery] DateTime? endDate = null)
-        {
-            try
-            {
-                var result = await _accountingService.GetTopProductsAsync(limit, startDate, endDate);
-                return Ok(result);
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new
-                {
-                    error = "Internal server error",
-                    message = ex.Message,
-                    statusCode = 500,
-                    timestamp = DateTime.UtcNow
-                });
+                return StatusCode(500, new { error = "An error occurred while fetching sales graph data" });
             }
         }
     }

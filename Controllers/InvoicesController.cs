@@ -176,6 +176,55 @@ namespace POS.Api.Controllers
             var config = await _invoiceService.UpdateShopConfigurationAsync(dto);
             return Ok(config);
         }
+
+        /// <summary>
+        /// Add a payment to an invoice (partial or full)
+        /// </summary>
+        [HttpPost("{id}/payments")]
+        public async Task<ActionResult<InvoicePaymentDto>> AddPayment(int id, [FromBody] CreateInvoicePaymentDto paymentDto)
+        {
+            try
+            {
+                var username = User.Identity?.Name ?? "System";
+                var payment = await _invoiceService.AddPaymentAsync(id, paymentDto, username);
+                return Ok(payment);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Get payment summary and history for an invoice
+        /// </summary>
+        [HttpGet("{id}/payments")]
+        public async Task<ActionResult<InvoicePaymentSummaryDto>> GetInvoicePayments(int id)
+        {
+            try
+            {
+                var summary = await _invoiceService.GetInvoicePaymentsAsync(id);
+                return Ok(summary);
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Get all payment records for an invoice
+        /// </summary>
+        [HttpGet("{id}/payments/list")]
+        public async Task<ActionResult<List<InvoicePaymentDto>>> GetAllPayments(int id)
+        {
+            var payments = await _invoiceService.GetAllPaymentsAsync(id);
+            return Ok(payments);
+        }
     }
 }
 

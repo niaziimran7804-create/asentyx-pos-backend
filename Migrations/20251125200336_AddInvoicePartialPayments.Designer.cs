@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using POS.Api.Data;
 
@@ -11,9 +12,11 @@ using POS.Api.Data;
 namespace POS.Api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251125200336_AddInvoicePartialPayments")]
+    partial class AddInvoicePartialPayments
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -321,11 +324,30 @@ namespace POS.Api.Migrations
                     b.Property<int?>("BarCodeId")
                         .HasColumnType("int");
 
-                    b.Property<int>("CustomerId")
-                        .HasColumnType("int");
+                    b.Property<string>("CustomerAddress")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("CustomerEmail")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("CustomerFullName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("CustomerPhone")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<DateTime>("Date")
                         .HasColumnType("datetime2");
+
+                    b.Property<int>("Id")
+                        .HasColumnType("int");
+
+                    b.Property<int>("OrderQuantity")
+                        .HasColumnType("int");
 
                     b.Property<string>("OrderStatus")
                         .IsRequired()
@@ -336,6 +358,12 @@ namespace POS.Api.Migrations
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("ProductMSRP")
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -349,7 +377,9 @@ namespace POS.Api.Migrations
 
                     b.HasIndex("BarCodeId");
 
-                    b.HasIndex("CustomerId");
+                    b.HasIndex("Id");
+
+                    b.HasIndex("ProductId");
 
                     b.ToTable("Orders");
                 });
@@ -502,123 +532,6 @@ namespace POS.Api.Migrations
                     b.HasIndex("BrandId");
 
                     b.ToTable("Products");
-                });
-
-            modelBuilder.Entity("POS.Api.Models.Return", b =>
-                {
-                    b.Property<int>("ReturnId")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("ReturnId"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("InvoiceId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Notes")
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<int>("OrderId")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("ProcessedBy")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("ProcessedDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("RefundMethod")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<DateTime>("ReturnDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("ReturnReason")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<string>("ReturnStatus")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<string>("ReturnType")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<decimal>("TotalReturnAmount")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("ReturnId");
-
-                    b.HasIndex("InvoiceId");
-
-                    b.HasIndex("OrderId");
-
-                    b.HasIndex("ProcessedBy");
-
-                    b.HasIndex("ReturnDate");
-
-                    b.HasIndex("ReturnStatus");
-
-                    b.HasIndex("ReturnType");
-
-                    b.ToTable("Returns", t =>
-                        {
-                            t.HasCheckConstraint("CHK_RefundMethod", "RefundMethod IN ('Cash', 'Card', 'Store Credit')");
-
-                            t.HasCheckConstraint("CHK_ReturnStatus", "ReturnStatus IN ('Pending', 'Approved', 'Completed', 'Rejected')");
-
-                            t.HasCheckConstraint("CHK_ReturnType", "ReturnType IN ('whole', 'partial')");
-                        });
-                });
-
-            modelBuilder.Entity("POS.Api.Models.ReturnItem", b =>
-                {
-                    b.Property<int>("ReturnItemId")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("ReturnItemId"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("ProductId")
-                        .HasColumnType("int");
-
-                    b.Property<decimal>("ReturnAmount")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<int>("ReturnId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("ReturnQuantity")
-                        .HasColumnType("int");
-
-                    b.HasKey("ReturnItemId");
-
-                    b.HasIndex("ProductId");
-
-                    b.HasIndex("ReturnId");
-
-                    b.ToTable("ReturnItems", t =>
-                        {
-                            t.HasCheckConstraint("CHK_ReturnAmount", "ReturnAmount >= 0");
-
-                            t.HasCheckConstraint("CHK_ReturnQuantity", "ReturnQuantity > 0");
-                        });
                 });
 
             modelBuilder.Entity("POS.Api.Models.SecondCategory", b =>
@@ -901,15 +814,23 @@ namespace POS.Api.Migrations
                         .WithMany("Orders")
                         .HasForeignKey("BarCodeId");
 
-                    b.HasOne("POS.Api.Models.User", "Customer")
+                    b.HasOne("POS.Api.Models.User", "User")
                         .WithMany("Orders")
-                        .HasForeignKey("CustomerId")
+                        .HasForeignKey("Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("POS.Api.Models.Product", "Product")
+                        .WithMany()
+                        .HasForeignKey("ProductId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.Navigation("BarCode");
 
-                    b.Navigation("Customer");
+                    b.Navigation("Product");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("POS.Api.Models.OrderHistory", b =>
@@ -959,51 +880,6 @@ namespace POS.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("Brand");
-                });
-
-            modelBuilder.Entity("POS.Api.Models.Return", b =>
-                {
-                    b.HasOne("POS.Api.Models.Invoice", "Invoice")
-                        .WithMany()
-                        .HasForeignKey("InvoiceId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("POS.Api.Models.Order", "Order")
-                        .WithMany()
-                        .HasForeignKey("OrderId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("POS.Api.Models.User", "ProcessedByUser")
-                        .WithMany()
-                        .HasForeignKey("ProcessedBy")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("Invoice");
-
-                    b.Navigation("Order");
-
-                    b.Navigation("ProcessedByUser");
-                });
-
-            modelBuilder.Entity("POS.Api.Models.ReturnItem", b =>
-                {
-                    b.HasOne("POS.Api.Models.Product", "Product")
-                        .WithMany()
-                        .HasForeignKey("ProductId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("POS.Api.Models.Return", "Return")
-                        .WithMany("ReturnItems")
-                        .HasForeignKey("ReturnId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Product");
-
-                    b.Navigation("Return");
                 });
 
             modelBuilder.Entity("POS.Api.Models.SecondCategory", b =>
@@ -1062,11 +938,6 @@ namespace POS.Api.Migrations
             modelBuilder.Entity("POS.Api.Models.Order", b =>
                 {
                     b.Navigation("OrderProductMaps");
-                });
-
-            modelBuilder.Entity("POS.Api.Models.Return", b =>
-                {
-                    b.Navigation("ReturnItems");
                 });
 
             modelBuilder.Entity("POS.Api.Models.SecondCategory", b =>

@@ -96,6 +96,7 @@ builder.Services.AddScoped<IAccountingService, AccountingService>();
 builder.Services.AddScoped<IExpenseService, ExpenseService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddScoped<IReturnService, ReturnService>();
 
 // AutoMapper
 builder.Services.AddAutoMapper(typeof(Program));

@@ -262,8 +262,27 @@ namespace POS.Api.Services
 
         public async Task<SalesGraphDto> GetSalesGraphAsync(DateTime startDate, DateTime endDate)
         {
+            // Validate date range
+            if (startDate > endDate)
+                throw new ArgumentException("startDate cannot be after endDate");
+
+            if ((endDate - startDate).TotalDays > 90)
+                throw new ArgumentException("Date range cannot exceed 90 days");
+
+            // Normalize dates to start and end of day
+            startDate = startDate.Date;
+            endDate = endDate.Date;
+
+            // Generate all dates in the range (including days with no data)
+            var dateRange = new List<DateTime>();
+            for (var date = startDate; date <= endDate; date = date.AddDays(1))
+            {
+                dateRange.Add(date);
+            }
+
+            // Get sales data
             var salesData = await _context.Orders
-                .Where(o => o.Date >= startDate && o.Date <= endDate && 
+                .Where(o => o.Date >= startDate && o.Date <= endDate.AddDays(1).AddTicks(-1) && 
                        (o.OrderStatus == "Completed" || o.OrderStatus == "Paid"))
                 .GroupBy(o => o.Date.Date)
                 .Select(g => new
@@ -272,11 +291,11 @@ namespace POS.Api.Services
                     TotalSales = g.Sum(o => o.TotalAmount),
                     TotalOrders = g.Count()
                 })
-                .OrderBy(g => g.Date)
-                .ToListAsync();
+                .ToDictionaryAsync(x => x.Date, x => x);
 
+            // Get expenses data
             var expensesData = await _context.AccountingEntries
-                .Where(e => e.EntryDate >= startDate && e.EntryDate <= endDate && 
+                .Where(e => e.EntryDate >= startDate && e.EntryDate <= endDate.AddDays(1).AddTicks(-1) && 
                        e.EntryType == EntryType.Expense)
                 .GroupBy(e => e.EntryDate.Date)
                 .Select(g => new
@@ -284,45 +303,30 @@ namespace POS.Api.Services
                     Date = g.Key,
                     TotalExpenses = g.Sum(e => e.Amount)
                 })
-                .OrderBy(g => g.Date)
-                .ToListAsync();
+                .ToDictionaryAsync(x => x.Date, x => x.TotalExpenses);
 
-            var refundsData = await _context.AccountingEntries
-                .Where(e => e.EntryDate >= startDate && e.EntryDate <= endDate && 
-                       e.EntryType == EntryType.Refund)
-                .GroupBy(e => e.EntryDate.Date)
-                .Select(g => new
-                {
-                    Date = g.Key,
-                    TotalRefunds = g.Sum(e => e.Amount)
-                })
-                .OrderBy(g => g.Date)
-                .ToListAsync();
-
-            var allDates = salesData.Select(s => s.Date)
-                .Union(expensesData.Select(e => e.Date))
-                .Union(refundsData.Select(r => r.Date))
-                .Distinct()
-                .OrderBy(d => d)
-                .ToList();
-
+            // Build result with all dates in range
             var result = new SalesGraphDto();
 
-            foreach (var date in allDates)
+            foreach (var date in dateRange)
             {
-                var sales = salesData.FirstOrDefault(s => s.Date == date);
-                var expenses = expensesData.FirstOrDefault(e => e.Date == date);
-                var refunds = refundsData.FirstOrDefault(r => r.Date == date);
-
-                var totalSales = sales?.TotalSales ?? 0;
-                var totalExpenses = expenses?.TotalExpenses ?? 0;
-                var totalRefunds = refunds?.TotalRefunds ?? 0;
-
+                // Format date label as "MMM dd"
                 result.Labels.Add(date.ToString("MMM dd"));
-                result.SalesData.Add(totalSales);
-                result.ExpensesData.Add(totalExpenses);
-                result.ProfitData.Add(totalSales - totalExpenses - totalRefunds);
-                result.OrdersData.Add(sales?.TotalOrders ?? 0);
+
+                // Get sales for this day (0 if no sales)
+                var dailySales = salesData.ContainsKey(date) ? salesData[date].TotalSales : 0m;
+                result.SalesData.Add(dailySales);
+
+                // Get expenses for this day (0 if no expenses)
+                var dailyExpenses = expensesData.ContainsKey(date) ? expensesData[date] : 0m;
+                result.ExpensesData.Add(dailyExpenses);
+
+                // Calculate profit (sales - expenses)
+                result.ProfitData.Add(dailySales - dailyExpenses);
+
+                // Get order count for this day (0 if no orders)
+                var dailyOrders = salesData.ContainsKey(date) ? salesData[date].TotalOrders : 0;
+                result.OrdersData.Add(dailyOrders);
             }
 
             return result;
@@ -420,24 +424,25 @@ namespace POS.Api.Services
 
         public async Task CreateRefundEntryFromOrderAsync(int orderId, string createdBy)
         {
-            var order = await _context.Orders.FindAsync(orderId);
+            var order = await _context.Orders
+                .Include(o => o.OrderProductMaps)
+                    .ThenInclude(opm => opm.Product)
+                .FirstOrDefaultAsync(o => o.OrderId == orderId);
+
             if (order == null)
                 return;
 
-            // Check if entry already exists to avoid duplicates
-            var existingEntry = await _context.AccountingEntries
-                .FirstOrDefaultAsync(e => e.EntryType == EntryType.Refund && 
-                                         e.Description.Contains($"Order #{orderId}"));
-            if (existingEntry != null)
-                return;
+            var productNames = order.OrderProductMaps.Any() 
+                ? string.Join(", ", order.OrderProductMaps.Select(opm => opm.Product?.ProductName ?? "Unknown"))
+                : "Products";
 
             var entry = new AccountingEntry
             {
                 EntryType = EntryType.Refund,
                 Amount = order.TotalAmount,
-                Description = $"Refund for Order #{orderId}",
+                Description = $"Refund for Order #{orderId} - {productNames}",
                 PaymentMethod = order.PaymentMethod,
-                Category = "Refunds",
+                Category = "Sales Refund",
                 EntryDate = DateTime.UtcNow,
                 CreatedBy = createdBy,
                 CreatedAt = DateTime.UtcNow,
@@ -465,9 +470,9 @@ namespace POS.Api.Services
             {
                 EntryType = EntryType.Expense,
                 Amount = expense.ExpenseAmount,
-                Description = $"{expense.ExpenseName} (Expense #{expenseId})",
-                PaymentMethod = "Cash",
-                Category = "Operations",
+                Description = $"Expense #{expenseId} - {expense.ExpenseName}",
+                PaymentMethod = "Cash", // Default
+                Category = "General Expense",
                 EntryDate = expense.ExpenseDate,
                 CreatedBy = createdBy,
                 CreatedAt = DateTime.UtcNow,

@@ -18,8 +18,7 @@ namespace POS.Api.Services
         public async Task<InvoiceDto> CreateInvoiceAsync(CreateInvoiceDto createInvoiceDto)
         {
             var order = await _context.Orders
-                .Include(o => o.User)
-                .Include(o => o.Product)
+                .Include(o => o.Customer)
                 .Include(o => o.OrderProductMaps)
                     .ThenInclude(opm => opm.Product)
                 .FirstOrDefaultAsync(o => o.OrderId == createInvoiceDto.OrderId);
@@ -45,7 +44,10 @@ namespace POS.Api.Services
                 InvoiceNumber = invoiceNumber,
                 InvoiceDate = DateTime.UtcNow,
                 DueDate = createInvoiceDto.DueDate ?? DateTime.UtcNow.AddDays(30),
-                Status = "Pending"
+                Status = "Pending",
+                TotalAmount = order.TotalAmount,
+                AmountPaid = 0,
+                Balance = order.TotalAmount
             };
 
             _context.Invoices.Add(invoice);
@@ -58,9 +60,7 @@ namespace POS.Api.Services
         {
             var invoice = await _context.Invoices
                 .Include(i => i.Order)
-                    .ThenInclude(o => o.User)
-                .Include(i => i.Order)
-                    .ThenInclude(o => o.Product)
+                    .ThenInclude(o => o.Customer)
                 .Include(i => i.Order)
                     .ThenInclude(o => o.OrderProductMaps)
                         .ThenInclude(opm => opm.Product)
@@ -79,26 +79,34 @@ namespace POS.Api.Services
                 InvoiceDate = invoice.InvoiceDate,
                 DueDate = invoice.DueDate,
                 Status = invoice.Status,
-                    Order = new OrderDto
-                    {
-                        OrderId = invoice.Order.OrderId,
-                        UserId = invoice.Order.Id,
-                        BarCodeId = invoice.Order.BarCodeId,
-                        Date = invoice.Order.Date,
-                        OrderQuantity = invoice.Order.OrderQuantity,
-                        ProductId = invoice.Order.ProductId,
-                        ProductMSRP = invoice.Order.ProductMSRP,
-                        Status = invoice.Order.Status,
-                        TotalAmount = invoice.Order.TotalAmount,
-                        PaymentMethod = invoice.Order.PaymentMethod,
-                        OrderStatus = invoice.Order.OrderStatus,
-                        CustomerFullName = invoice.Order.CustomerFullName,
-                        CustomerPhone = invoice.Order.CustomerPhone,
-                        CustomerAddress = invoice.Order.CustomerAddress,
-                        CustomerEmail = invoice.Order.CustomerEmail,
-                        ProductName = invoice.Order.Product?.ProductName,
-                        UserName = invoice.Order.User != null ? $"{invoice.Order.User.FirstName} {invoice.Order.User.LastName}" : null
-                    },
+                TotalAmount = invoice.TotalAmount,
+                AmountPaid = invoice.AmountPaid,
+                Balance = invoice.Balance,
+                Order = new OrderDto
+                {
+                    OrderId = invoice.Order.OrderId,
+                    CustomerId = invoice.Order.CustomerId,
+                    BarCodeId = invoice.Order.BarCodeId,
+                    Date = invoice.Order.Date,
+                    Status = invoice.Order.Status,
+                    TotalAmount = invoice.Order.TotalAmount,
+                    PaymentMethod = invoice.Order.PaymentMethod,
+                    OrderStatus = invoice.Order.OrderStatus,
+                    CustomerName = invoice.Order.Customer != null 
+                        ? $"{invoice.Order.Customer.FirstName} {invoice.Order.Customer.LastName}" 
+                        : null,
+                    CustomerPhone = invoice.Order.Customer?.Phone,
+                    CustomerEmail = invoice.Order.Customer?.Email,
+                    CustomerAddress = invoice.Order.Customer?.CurrentCity
+                },
+                Items = invoice.Order.OrderProductMaps.Select(opm => new InvoiceItemDto
+                {
+                    ProductId = opm.ProductId,
+                    ProductName = opm.Product?.ProductName ?? "Unknown",
+                    Quantity = opm.Quantity,
+                    UnitPrice = opm.UnitPrice,
+                    TotalPrice = opm.TotalPrice
+                }).ToList(),
                 ShopConfig = shopConfig
             };
         }
@@ -116,11 +124,16 @@ namespace POS.Api.Services
 
         public async Task<IEnumerable<InvoiceDto>> GetAllInvoicesAsync()
         {
+            // Filter for last 14 days only
+            var fourteenDaysAgo = DateTime.UtcNow.AddDays(-14);
+            
             var invoices = await _context.Invoices
                 .Include(i => i.Order)
-                    .ThenInclude(o => o.User)
+                    .ThenInclude(o => o.Customer)
                 .Include(i => i.Order)
-                    .ThenInclude(o => o.Product)
+                    .ThenInclude(o => o.OrderProductMaps)
+                        .ThenInclude(opm => opm.Product)
+                .Where(i => i.InvoiceDate >= fourteenDaysAgo) // Filter last 14 days
                 .ToListAsync();
 
             var shopConfig = await GetShopConfigurationAsync();
@@ -138,26 +151,34 @@ namespace POS.Api.Services
                     InvoiceDate = invoice.InvoiceDate,
                     DueDate = invoice.DueDate,
                     Status = invoice.Status,
+                    TotalAmount = invoice.TotalAmount,
+                    AmountPaid = invoice.AmountPaid,
+                    Balance = invoice.Balance,
                     Order = new OrderDto
                     {
                         OrderId = invoice.Order.OrderId,
-                        UserId = invoice.Order.Id,
+                        CustomerId = invoice.Order.CustomerId,
                         BarCodeId = invoice.Order.BarCodeId,
                         Date = invoice.Order.Date,
-                        OrderQuantity = invoice.Order.OrderQuantity,
-                        ProductId = invoice.Order.ProductId,
-                        ProductMSRP = invoice.Order.ProductMSRP,
                         Status = invoice.Order.Status,
                         TotalAmount = invoice.Order.TotalAmount,
                         PaymentMethod = invoice.Order.PaymentMethod,
                         OrderStatus = invoice.Order.OrderStatus,
-                        CustomerFullName = invoice.Order.CustomerFullName,
-                        CustomerPhone = invoice.Order.CustomerPhone,
-                        CustomerAddress = invoice.Order.CustomerAddress,
-                        CustomerEmail = invoice.Order.CustomerEmail,
-                        ProductName = invoice.Order.Product?.ProductName,
-                        UserName = invoice.Order.User != null ? $"{invoice.Order.User.FirstName} {invoice.Order.User.LastName}" : null
+                        CustomerName = invoice.Order.Customer != null 
+                            ? $"{invoice.Order.Customer.FirstName} {invoice.Order.Customer.LastName}" 
+                            : null,
+                        CustomerPhone = invoice.Order.Customer?.Phone,
+                        CustomerEmail = invoice.Order.Customer?.Email,
+                        CustomerAddress = invoice.Order.Customer?.CurrentCity
                     },
+                    Items = invoice.Order.OrderProductMaps.Select(opm => new InvoiceItemDto
+                    {
+                        ProductId = opm.ProductId,
+                        ProductName = opm.Product?.ProductName ?? "Unknown",
+                        Quantity = opm.Quantity,
+                        UnitPrice = opm.UnitPrice,
+                        TotalPrice = opm.TotalPrice
+                    }).ToList(),
                     ShopConfig = shopConfig
                 });
             }
@@ -169,9 +190,10 @@ namespace POS.Api.Services
         {
             var query = _context.Invoices
                 .Include(i => i.Order)
-                    .ThenInclude(o => o.User)
+                    .ThenInclude(o => o.Customer)
                 .Include(i => i.Order)
-                    .ThenInclude(o => o.Product)
+                    .ThenInclude(o => o.OrderProductMaps)
+                        .ThenInclude(opm => opm.Product)
                 .AsQueryable();
 
             // Filter by amount
@@ -201,8 +223,9 @@ namespace POS.Api.Services
             {
                 var addressLower = filter.CustomerAddress.ToLower();
                 query = query.Where(i => i.Order != null && 
-                    i.Order.CustomerAddress != null && 
-                    i.Order.CustomerAddress.ToLower().Contains(addressLower));
+                    i.Order.Customer != null &&
+                    i.Order.Customer.CurrentCity != null && 
+                    i.Order.Customer.CurrentCity.ToLower().Contains(addressLower));
             }
 
             // Filter by status
@@ -228,26 +251,34 @@ namespace POS.Api.Services
                     InvoiceDate = invoice.InvoiceDate,
                     DueDate = invoice.DueDate,
                     Status = invoice.Status,
+                    TotalAmount = invoice.TotalAmount,
+                    AmountPaid = invoice.AmountPaid,
+                    Balance = invoice.Balance,
                     Order = new OrderDto
                     {
                         OrderId = invoice.Order.OrderId,
-                        UserId = invoice.Order.Id,
+                        CustomerId = invoice.Order.CustomerId,
                         BarCodeId = invoice.Order.BarCodeId,
                         Date = invoice.Order.Date,
-                        OrderQuantity = invoice.Order.OrderQuantity,
-                        ProductId = invoice.Order.ProductId,
-                        ProductMSRP = invoice.Order.ProductMSRP,
                         Status = invoice.Order.Status,
                         TotalAmount = invoice.Order.TotalAmount,
                         PaymentMethod = invoice.Order.PaymentMethod,
                         OrderStatus = invoice.Order.OrderStatus,
-                        CustomerFullName = invoice.Order.CustomerFullName,
-                        CustomerPhone = invoice.Order.CustomerPhone,
-                        CustomerAddress = invoice.Order.CustomerAddress,
-                        CustomerEmail = invoice.Order.CustomerEmail,
-                        ProductName = invoice.Order.Product?.ProductName,
-                        UserName = invoice.Order.User != null ? $"{invoice.Order.User.FirstName} {invoice.Order.User.LastName}" : null
+                        CustomerName = invoice.Order.Customer != null 
+                            ? $"{invoice.Order.Customer.FirstName} {invoice.Order.Customer.LastName}" 
+                            : null,
+                        CustomerPhone = invoice.Order.Customer?.Phone,
+                        CustomerEmail = invoice.Order.Customer?.Email,
+                        CustomerAddress = invoice.Order.Customer?.CurrentCity
                     },
+                    Items = invoice.Order.OrderProductMaps.Select(opm => new InvoiceItemDto
+                    {
+                        ProductId = opm.ProductId,
+                        ProductName = opm.Product?.ProductName ?? "Unknown",
+                        Quantity = opm.Quantity,
+                        UnitPrice = opm.UnitPrice,
+                        TotalPrice = opm.TotalPrice
+                    }).ToList(),
                     ShopConfig = shopConfig
                 });
             }
@@ -429,8 +460,8 @@ namespace POS.Api.Services
             // Customer Info
             sb.AppendLine("<div class='customer-details'>");
             sb.AppendLine("<h3>Bill To:</h3>");
-            if (!string.IsNullOrEmpty(invoice.Order.CustomerFullName))
-                sb.AppendLine($"<p><strong>{invoice.Order.CustomerFullName}</strong></p>");
+            if (!string.IsNullOrEmpty(invoice.Order.CustomerName))
+                sb.AppendLine($"<p><strong>{invoice.Order.CustomerName}</strong></p>");
             if (!string.IsNullOrEmpty(invoice.Order.CustomerAddress))
                 sb.AppendLine($"<p>{invoice.Order.CustomerAddress}</p>");
             if (!string.IsNullOrEmpty(invoice.Order.CustomerPhone))
@@ -637,6 +668,128 @@ namespace POS.Api.Services
             invoice.Status = status;
             await _context.SaveChangesAsync();
             return true;
+        }
+
+        public async Task<InvoicePaymentDto> AddPaymentAsync(int invoiceId, CreateInvoicePaymentDto paymentDto, string receivedBy)
+        {
+            var invoice = await _context.Invoices.FindAsync(invoiceId);
+            if (invoice == null)
+                throw new ArgumentException("Invoice not found");
+
+            // Validate payment amount
+            if (paymentDto.Amount <= 0)
+                throw new ArgumentException("Payment amount must be greater than zero");
+
+            if (paymentDto.Amount > invoice.Balance)
+                throw new ArgumentException($"Payment amount ({paymentDto.Amount:C}) cannot exceed invoice balance ({invoice.Balance:C})");
+
+            if (invoice.Status == "Paid")
+                throw new InvalidOperationException("Invoice is already fully paid");
+
+            if (invoice.Status == "Cancelled")
+                throw new InvalidOperationException("Cannot add payment to cancelled invoice");
+
+            // Create payment record
+            var payment = new InvoicePayment
+            {
+                InvoiceId = invoiceId,
+                Amount = paymentDto.Amount,
+                PaymentMethod = paymentDto.PaymentMethod,
+                Notes = paymentDto.Notes,
+                PaymentDate = paymentDto.PaymentDate,
+                ReceivedBy = receivedBy,
+                TransactionReference = paymentDto.TransactionReference,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            _context.InvoicePayments.Add(payment);
+
+            // Update invoice amounts
+            invoice.AmountPaid += paymentDto.Amount;
+            invoice.Balance = invoice.TotalAmount - invoice.AmountPaid;
+
+            // Update invoice status
+            if (invoice.Balance == 0)
+            {
+                invoice.Status = "Paid";
+            }
+            else if (invoice.AmountPaid > 0 && invoice.Balance > 0)
+            {
+                invoice.Status = "PartiallyPaid";
+            }
+
+            await _context.SaveChangesAsync();
+
+            return new InvoicePaymentDto
+            {
+                PaymentId = payment.PaymentId,
+                InvoiceId = payment.InvoiceId,
+                Amount = payment.Amount,
+                PaymentMethod = payment.PaymentMethod,
+                Notes = payment.Notes,
+                PaymentDate = payment.PaymentDate,
+                ReceivedBy = payment.ReceivedBy,
+                TransactionReference = payment.TransactionReference,
+                CreatedAt = payment.CreatedAt
+            };
+        }
+
+        public async Task<InvoicePaymentSummaryDto> GetInvoicePaymentsAsync(int invoiceId)
+        {
+            var invoice = await _context.Invoices
+                .Include(i => i.Payments)
+                .FirstOrDefaultAsync(i => i.InvoiceId == invoiceId);
+
+            if (invoice == null)
+                throw new ArgumentException("Invoice not found");
+
+            var payments = invoice.Payments
+                .OrderByDescending(p => p.PaymentDate)
+                .Select(p => new InvoicePaymentDto
+                {
+                    PaymentId = p.PaymentId,
+                    InvoiceId = p.InvoiceId,
+                    Amount = p.Amount,
+                    PaymentMethod = p.PaymentMethod,
+                    Notes = p.Notes,
+                    PaymentDate = p.PaymentDate,
+                    ReceivedBy = p.ReceivedBy,
+                    TransactionReference = p.TransactionReference,
+                    CreatedAt = p.CreatedAt
+                })
+                .ToList();
+
+            return new InvoicePaymentSummaryDto
+            {
+                InvoiceId = invoice.InvoiceId,
+                InvoiceNumber = invoice.InvoiceNumber,
+                TotalAmount = invoice.TotalAmount,
+                AmountPaid = invoice.AmountPaid,
+                Balance = invoice.Balance,
+                Status = invoice.Status,
+                Payments = payments
+            };
+        }
+
+        public async Task<List<InvoicePaymentDto>> GetAllPaymentsAsync(int invoiceId)
+        {
+            var payments = await _context.InvoicePayments
+                .Where(p => p.InvoiceId == invoiceId)
+                .OrderByDescending(p => p.PaymentDate)
+                .ToListAsync();
+
+            return payments.Select(p => new InvoicePaymentDto
+            {
+                PaymentId = p.PaymentId,
+                InvoiceId = p.InvoiceId,
+                Amount = p.Amount,
+                PaymentMethod = p.PaymentMethod,
+                Notes = p.Notes,
+                PaymentDate = p.PaymentDate,
+                ReceivedBy = p.ReceivedBy,
+                TransactionReference = p.TransactionReference,
+                CreatedAt = p.CreatedAt
+            }).ToList();
         }
     }
 }

@@ -14,6 +14,11 @@ namespace POS.Api.Services
         Task<ShopConfigurationDto> GetShopConfigurationAsync();
         Task<ShopConfigurationDto> UpdateShopConfigurationAsync(UpdateShopConfigurationDto dto);
         Task<bool> UpdateInvoiceStatusByOrderIdAsync(int orderId, string status);
+        
+        // Partial payment methods
+        Task<InvoicePaymentDto> AddPaymentAsync(int invoiceId, CreateInvoicePaymentDto paymentDto, string receivedBy);
+        Task<InvoicePaymentSummaryDto> GetInvoicePaymentsAsync(int invoiceId);
+        Task<List<InvoicePaymentDto>> GetAllPaymentsAsync(int invoiceId);
     }
 }
 
