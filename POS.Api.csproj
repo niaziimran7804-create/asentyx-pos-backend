@@ -25,5 +25,13 @@
     <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="12.0.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EditorConfigFiles Remove="D:\asentyx pos\backend\.editorconfig" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="D:\asentyx pos\backend\.editorconfig" />
+  </ItemGroup>
+
 </Project>
 

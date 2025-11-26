@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using POS.Api.DTOs;
 using POS.Api.Services;
+using System.Security.Claims;
 
 namespace POS.Api.Controllers
 {
@@ -37,7 +38,8 @@ namespace POS.Api.Controllers
         [HttpPost]
         public async Task<ActionResult<ExpenseDto>> CreateExpense([FromBody] CreateExpenseDto createExpenseDto)
         {
-            var expense = await _expenseService.CreateExpenseAsync(createExpenseDto);
+            var username = User.FindFirst(ClaimTypes.Name)?.Value ?? "System";
+            var expense = await _expenseService.CreateExpenseAsync(createExpenseDto, username);
             return CreatedAtAction(nameof(GetExpense), new { id = expense.ExpenseId }, expense);
         }
 

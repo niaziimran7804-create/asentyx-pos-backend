@@ -12,6 +12,8 @@ namespace POS.Api.Services
         Task<int> GetTotalProductsAsync();
         Task<int> GetAvailableProductsAsync();
         Task<int> GetUnavailableProductsAsync();
+        Task<bool> DeductInventoryAsync(int productId, int quantity);
+        Task<bool> RestoreInventoryAsync(int productId, int quantity);
     }
 }
 

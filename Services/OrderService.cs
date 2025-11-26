@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using POS.Api.Data;
 using POS.Api.DTOs;
+using POS.Api.Models;
 
 namespace POS.Api.Services
 {
@@ -8,18 +9,26 @@ namespace POS.Api.Services
     {
         private readonly ApplicationDbContext _context;
         private readonly IInvoiceService _invoiceService;
+        private readonly IAccountingService _accountingService;
+        private readonly IProductService _productService;
+        private readonly ILedgerService _ledgerService;
 
-        public OrderService(ApplicationDbContext context, IInvoiceService invoiceService)
+        public OrderService(ApplicationDbContext context, IInvoiceService invoiceService, 
+            IAccountingService accountingService, IProductService productService, ILedgerService ledgerService)
         {
             _context = context;
             _invoiceService = invoiceService;
+            _accountingService = accountingService;
+            _productService = productService;
+            _ledgerService = ledgerService;
         }
 
         public async Task<IEnumerable<OrderDto>> GetAllOrdersAsync()
         {
             var orders = await _context.Orders
-                .Include(o => o.User)
-                .Include(o => o.Product)
+                .Include(o => o.Customer)
+                .Include(o => o.OrderProductMaps)
+                    .ThenInclude(opm => opm.Product)
                 .ToListAsync();
 
             var orderIds = orders.Select(o => o.OrderId).ToList();
@@ -30,31 +39,35 @@ namespace POS.Api.Services
             return orders.Select(o => new OrderDto
             {
                 OrderId = o.OrderId,
-                UserId = o.Id,
+                CustomerId = o.CustomerId,
                 BarCodeId = o.BarCodeId,
                 Date = o.Date,
-                OrderQuantity = o.OrderQuantity,
-                ProductId = o.ProductId,
-                ProductMSRP = o.ProductMSRP,
                 Status = o.Status,
                 TotalAmount = o.TotalAmount,
                 OrderStatus = o.OrderStatus,
                 PaymentMethod = o.PaymentMethod,
-                ProductName = o.Product?.ProductName,
-                UserName = o.User != null ? $"{o.User.FirstName} {o.User.LastName}" : null,
-                CustomerFullName = o.CustomerFullName,
-                CustomerPhone = o.CustomerPhone,
-                CustomerAddress = o.CustomerAddress,
-                CustomerEmail = o.CustomerEmail,
-                InvoiceId = invoices.ContainsKey(o.OrderId) ? invoices[o.OrderId] : null
+                CustomerName = o.Customer != null ? $"{o.Customer.FirstName} {o.Customer.LastName}" : null,
+                CustomerPhone = o.Customer?.Phone,
+                CustomerEmail = o.Customer?.Email,
+                CustomerAddress = o.Customer?.CurrentCity,
+                InvoiceId = invoices.ContainsKey(o.OrderId) ? invoices[o.OrderId] : null,
+                Items = o.OrderProductMaps.Select(opm => new OrderItemDetailDto
+                {
+                    ProductId = opm.ProductId,
+                    ProductName = opm.Product?.ProductName ?? "Unknown",
+                    Quantity = opm.Quantity,
+                    UnitPrice = opm.UnitPrice,
+                    TotalPrice = opm.TotalPrice
+                }).ToList()
             });
         }
 
         public async Task<OrderDto?> GetOrderByIdAsync(int id)
         {
             var order = await _context.Orders
-                .Include(o => o.User)
-                .Include(o => o.Product)
+                .Include(o => o.Customer)
+                .Include(o => o.OrderProductMaps)
+                    .ThenInclude(opm => opm.Product)
                 .FirstOrDefaultAsync(o => o.OrderId == id);
 
             if (order == null)
@@ -66,50 +79,130 @@ namespace POS.Api.Services
             return new OrderDto
             {
                 OrderId = order.OrderId,
-                UserId = order.Id,
+                CustomerId = order.CustomerId,
                 BarCodeId = order.BarCodeId,
                 Date = order.Date,
-                OrderQuantity = order.OrderQuantity,
-                ProductId = order.ProductId,
-                ProductMSRP = order.ProductMSRP,
                 Status = order.Status,
                 TotalAmount = order.TotalAmount,
                 OrderStatus = order.OrderStatus,
                 PaymentMethod = order.PaymentMethod,
-                ProductName = order.Product?.ProductName,
-                UserName = order.User != null ? $"{order.User.FirstName} {order.User.LastName}" : null,
-                CustomerFullName = order.CustomerFullName,
-                CustomerPhone = order.CustomerPhone,
-                CustomerAddress = order.CustomerAddress,
-                CustomerEmail = order.CustomerEmail,
-                InvoiceId = invoice?.InvoiceId
+                CustomerName = order.Customer != null ? $"{order.Customer.FirstName} {order.Customer.LastName}" : null,
+                CustomerPhone = order.Customer?.Phone,
+                CustomerEmail = order.Customer?.Email,
+                CustomerAddress = order.Customer?.CurrentCity,
+                InvoiceId = invoice?.InvoiceId,
+                Items = order.OrderProductMaps.Select(opm => new OrderItemDetailDto
+                {
+                    ProductId = opm.ProductId,
+                    ProductName = opm.Product?.ProductName ?? "Unknown",
+                    Quantity = opm.Quantity,
+                    UnitPrice = opm.UnitPrice,
+                    TotalPrice = opm.TotalPrice
+                }).ToList()
             };
         }
 
         public async Task<OrderDto> CreateOrderAsync(CreateOrderDto createOrderDto)
         {
+            // Validate items array
+            if (createOrderDto.Items == null || createOrderDto.Items.Count == 0)
+            {
+                throw new InvalidOperationException("Order must contain at least one item");
+            }
+
+            // Step 1: Find or create customer in Users table
+            int customerId;
+            User? customer = null;
+
+            // Try to find existing customer by phone first (most reliable)
+            if (!string.IsNullOrWhiteSpace(createOrderDto.CustomerPhone))
+            {
+                customer = await _context.Users
+                    .FirstOrDefaultAsync(u => u.Role == "Customer" && u.Phone == createOrderDto.CustomerPhone);
+                
+                if (customer != null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Found existing customer by phone: {customer.Id} - {customer.FirstName} {customer.LastName}");
+                }
+            }
+
+            // If not found by phone, try email
+            if (customer == null && !string.IsNullOrWhiteSpace(createOrderDto.CustomerEmail))
+            {
+                customer = await _context.Users
+                    .FirstOrDefaultAsync(u => u.Role == "Customer" && u.Email == createOrderDto.CustomerEmail);
+                
+                if (customer != null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Found existing customer by email: {customer.Id} - {customer.FirstName} {customer.LastName}");
+                }
+            }
+
+            // Create new customer if not found
+            if (customer == null)
+            {
+                System.Diagnostics.Debug.WriteLine($"No existing customer found. Creating new customer for: {createOrderDto.CustomerFullName}");
+                
+                // Ensure we have at least a name
+                if (string.IsNullOrWhiteSpace(createOrderDto.CustomerFullName))
+                {
+                    throw new InvalidOperationException("Customer full name is required to create a new order");
+                }
+
+                var nameParts = createOrderDto.CustomerFullName.Trim().Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+                var firstName = nameParts.Length > 0 ? nameParts[0] : createOrderDto.CustomerFullName;
+                var lastName = nameParts.Length > 1 ? nameParts[1] : "";
+
+                customer = new User
+                {
+                    UserId = $"CUST_{DateTime.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid().ToString().Substring(0, 8)}",
+                    FirstName = firstName,
+                    LastName = lastName,
+                    Password = "", // Customers don't need login password
+                    Email = createOrderDto.CustomerEmail,
+                    Phone = createOrderDto.CustomerPhone,
+                    CurrentCity = createOrderDto.CustomerAddress,
+                    Role = "Customer",
+                    Salary = 0,
+                    Age = 0,
+                    JoinDate = DateTime.UtcNow,
+                    Birthdate = DateTime.UtcNow // Default, not relevant for customers
+                };
+
+                _context.Users.Add(customer);
+                await _context.SaveChangesAsync();
+                
+                System.Diagnostics.Debug.WriteLine($"Created new customer: {customer.Id} - {customer.FirstName} {customer.LastName} (Phone: {customer.Phone}, Email: {customer.Email})");
+            }
+
+            // Ensure we have a valid customer ID
+            customerId = customer.Id;
+            if (customerId <= 0)
+            {
+                throw new InvalidOperationException("Failed to create or find customer for order");
+            }
+
+            // Step 2: Calculate total amount from items
+            var totalAmount = createOrderDto.Items.Sum(item => item.Quantity * item.UnitPrice);
+
+            // Step 3: Create order
             var order = new Models.Order
             {
-                Id = createOrderDto.UserId,
+                CustomerId = customerId,
                 BarCodeId = createOrderDto.BarCodeId,
                 Date = DateTime.UtcNow,
-                OrderQuantity = createOrderDto.OrderQuantity,
-                ProductId = createOrderDto.ProductId,
-                ProductMSRP = createOrderDto.ProductMSRP,
                 Status = "Pending",
-                TotalAmount = createOrderDto.Items.Sum(i => i.Quantity * i.UnitPrice),
+                TotalAmount = totalAmount,
                 OrderStatus = "Pending",
-                PaymentMethod = createOrderDto.PaymentMethod,
-                CustomerFullName = createOrderDto.CustomerFullName,
-                CustomerPhone = createOrderDto.CustomerPhone,
-                CustomerAddress = createOrderDto.CustomerAddress,
-                CustomerEmail = createOrderDto.CustomerEmail
+                PaymentMethod = createOrderDto.PaymentMethod
             };
 
             _context.Orders.Add(order);
             await _context.SaveChangesAsync();
 
-            // Add order product maps
+            System.Diagnostics.Debug.WriteLine($"Created order {order.OrderId} for customer {customerId} with total amount {totalAmount}");
+
+            // Step 4: Add order product maps and deduct inventory
             foreach (var item in createOrderDto.Items)
             {
                 var orderProductMap = new Models.OrderProductMap
@@ -121,26 +214,39 @@ namespace POS.Api.Services
                     TotalPrice = item.Quantity * item.UnitPrice
                 };
                 _context.OrderProductMaps.Add(orderProductMap);
+
+                // Deduct inventory when order is created
+                try
+                {
+                    await _productService.DeductInventoryAsync(item.ProductId, item.Quantity);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    // Rollback the order if insufficient stock
+                    _context.Orders.Remove(order);
+                    await _context.SaveChangesAsync();
+                    throw new InvalidOperationException($"Order creation failed: {ex.Message}");
+                }
             }
 
             await _context.SaveChangesAsync();
 
-            // Create history entry for order creation
+            // Step 5: Create history entry for order creation
             var createHistory = new Models.OrderHistory
             {
                 OrderId = order.OrderId,
-                UserId = createOrderDto.UserId,
+                UserId = customerId,
                 PreviousStatus = null,
                 NewStatus = "Pending",
                 PreviousOrderStatus = null,
                 NewOrderStatus = "Pending",
                 Action = "Created",
-                Notes = "Order created",
+                Notes = $"Order created for customer {customer.FirstName} {customer.LastName}",
                 ChangedDate = DateTime.UtcNow
             };
             _context.OrderHistories.Add(createHistory);
 
-            // Automatically create invoice for the order
+            // Step 6: Automatically create invoice for the order
             int? invoiceId = null;
             try
             {
@@ -151,12 +257,20 @@ namespace POS.Api.Services
                 };
                 var invoice = await _invoiceService.CreateInvoiceAsync(createInvoiceDto);
                 invoiceId = invoice.InvoiceId;
+
+                // Step 7: Create ledger entry for the sale
+                try
+                {
+                    await _ledgerService.CreateSaleLedgerEntryAsync(order.OrderId, invoice.InvoiceId, "System");
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Failed to create ledger entry for order {order.OrderId}: {ex.Message}");
+                }
             }
             catch (Exception ex)
             {
                 // Log the error but don't fail the order creation
-                // Invoice can be created manually later if needed
-                // In production, use proper logging framework (e.g., ILogger)
                 System.Diagnostics.Debug.WriteLine($"Failed to create invoice for order {order.OrderId}: {ex.Message}");
             }
 
@@ -176,19 +290,12 @@ namespace POS.Api.Services
             if (order == null)
                 return false;
 
-            order.Id = orderDto.UserId;
+            order.CustomerId = orderDto.CustomerId;
             order.BarCodeId = orderDto.BarCodeId;
-            order.OrderQuantity = orderDto.OrderQuantity;
-            order.ProductId = orderDto.ProductId;
-            order.ProductMSRP = orderDto.ProductMSRP;
             order.Status = orderDto.Status;
             order.TotalAmount = orderDto.TotalAmount;
             order.OrderStatus = orderDto.OrderStatus;
             order.PaymentMethod = orderDto.PaymentMethod;
-            order.CustomerFullName = orderDto.CustomerFullName;
-            order.CustomerPhone = orderDto.CustomerPhone;
-            order.CustomerAddress = orderDto.CustomerAddress;
-            order.CustomerEmail = orderDto.CustomerEmail;
 
             await _context.SaveChangesAsync();
             return true;
@@ -196,7 +303,10 @@ namespace POS.Api.Services
 
         public async Task<bool> UpdateOrderStatusAsync(int id, UpdateOrderStatusDto updateDto, int userId)
         {
-            var order = await _context.Orders.FindAsync(id);
+            var order = await _context.Orders
+                .Include(o => o.OrderProductMaps)
+                .FirstOrDefaultAsync(o => o.OrderId == id);
+            
             if (order == null)
                 return false;
 
@@ -210,6 +320,23 @@ namespace POS.Api.Services
             // Store previous values for history
             var previousStatus = order.Status;
             var previousOrderStatus = order.OrderStatus;
+
+            // Restore inventory when order is cancelled
+            if ((updateDto.Status == "Cancelled" || updateDto.OrderStatus == "Cancelled") && 
+                (previousStatus != "Cancelled" && previousOrderStatus != "Cancelled"))
+            {
+                foreach (var orderProductMap in order.OrderProductMaps)
+                {
+                    try
+                    {
+                        await _productService.RestoreInventoryAsync(orderProductMap.ProductId, orderProductMap.Quantity);
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Failed to restore inventory for product {orderProductMap.ProductId}: {ex.Message}");
+                    }
+                }
+            }
 
             // Only update status fields
             order.Status = updateDto.Status;
@@ -232,6 +359,39 @@ namespace POS.Api.Services
                 ChangedDate = DateTime.UtcNow
             };
             _context.OrderHistories.Add(history);
+
+            // Get user info for accounting entries
+            var user = await _context.Users.FindAsync(userId);
+            var username = user != null ? $"{user.FirstName} {user.LastName}" : "System";
+
+            // Create accounting entry for sale when order is paid
+            if ((updateDto.Status == "Paid" || updateDto.OrderStatus == "Paid") && 
+                (previousStatus != "Paid" && previousOrderStatus != "Paid"))
+            {
+                try
+                {
+                    await _accountingService.CreateSaleEntryFromOrderAsync(order.OrderId, username);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Failed to create accounting entry for order {order.OrderId}: {ex.Message}");
+                }
+            }
+
+            // Create accounting entry for refund when order is cancelled
+            if ((updateDto.Status == "Cancelled" || updateDto.OrderStatus == "Cancelled") && 
+                (previousStatus != "Cancelled" && previousOrderStatus != "Cancelled") &&
+                (previousStatus == "Paid" || previousOrderStatus == "Paid"))
+            {
+                try
+                {
+                    await _accountingService.CreateRefundEntryFromOrderAsync(order.OrderId, username);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Failed to create refund entry for order {order.OrderId}: {ex.Message}");
+                }
+            }
 
             // Update invoice status when order is paid
             if (updateDto.Status == "Paid" || updateDto.OrderStatus == "Paid")
@@ -277,14 +437,36 @@ namespace POS.Api.Services
                 throw new ArgumentException("OrderStatus must be either 'Paid', 'Pending', or 'Cancelled'");
 
             var orders = await _context.Orders
+                .Include(o => o.OrderProductMaps)
                 .Where(o => bulkUpdateDto.OrderIds.Contains(o.OrderId))
                 .ToListAsync();
+
+            // Get user info for accounting entries
+            var user = await _context.Users.FindAsync(userId);
+            var username = user != null ? $"{user.FirstName} {user.LastName}" : "System";
 
             int updatedCount = 0;
             foreach (var order in orders)
             {
                 var previousStatus = order.Status;
                 var previousOrderStatus = order.OrderStatus;
+
+                // Restore inventory when order is cancelled
+                if ((bulkUpdateDto.Status == "Cancelled" || bulkUpdateDto.OrderStatus == "Cancelled") && 
+                    (previousStatus != "Cancelled" && previousOrderStatus != "Cancelled"))
+                {
+                    foreach (var orderProductMap in order.OrderProductMaps)
+                    {
+                        try
+                        {
+                            await _productService.RestoreInventoryAsync(orderProductMap.ProductId, orderProductMap.Quantity);
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Failed to restore inventory for product {orderProductMap.ProductId}: {ex.Message}");
+                        }
+                    }
+                }
 
                 order.Status = bulkUpdateDto.Status;
                 order.OrderStatus = bulkUpdateDto.OrderStatus;
@@ -305,6 +487,35 @@ namespace POS.Api.Services
                     ChangedDate = DateTime.UtcNow
                 };
                 _context.OrderHistories.Add(history);
+
+                // Create accounting entry for sale when order is paid
+                if ((bulkUpdateDto.Status == "Paid" || bulkUpdateDto.OrderStatus == "Paid") && 
+                    (previousStatus != "Paid" && previousOrderStatus != "Paid"))
+                {
+                    try
+                    {
+                        await _accountingService.CreateSaleEntryFromOrderAsync(order.OrderId, username);
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Failed to create accounting entry for order {order.OrderId}: {ex.Message}");
+                    }
+                }
+
+                // Create accounting entry for refund when order is cancelled
+                if ((bulkUpdateDto.Status == "Cancelled" || bulkUpdateDto.OrderStatus == "Cancelled") && 
+                    (previousStatus != "Cancelled" && previousOrderStatus != "Cancelled") &&
+                    (previousStatus == "Paid" || previousOrderStatus == "Paid"))
+                {
+                    try
+                    {
+                        await _accountingService.CreateRefundEntryFromOrderAsync(order.OrderId, username);
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Failed to create refund entry for order {order.OrderId}: {ex.Message}");
+                    }
+                }
 
                 // Update invoice status when order is paid
                 if (bulkUpdateDto.Status == "Paid" || bulkUpdateDto.OrderStatus == "Paid")
@@ -355,34 +566,1667 @@ namespace POS.Api.Services
 
             var searchLower = searchTerm.ToLower();
 
-            var customers = await _context.Orders
-                .Where(o => !string.IsNullOrEmpty(o.CustomerFullName) &&
-                           (o.CustomerFullName.ToLower().Contains(searchLower) ||
-                            (o.CustomerPhone != null && o.CustomerPhone.Contains(searchTerm)) ||
-                            (o.CustomerEmail != null && o.CustomerEmail.ToLower().Contains(searchLower))))
-                .GroupBy(o => new
+            // Search in Users table where Role = "Customer"
+            var customers = await _context.Users
+                .Where(u => u.Role == "Customer" &&
+                           ((u.FirstName + " " + u.LastName).ToLower().Contains(searchLower) ||
+                            (u.Phone != null && u.Phone.Contains(searchTerm)) ||
+                            (u.Email != null && u.Email.ToLower().Contains(searchLower))))
+                .Select(u => new
                 {
-                    o.CustomerFullName,
-                    o.CustomerPhone,
-                    o.CustomerEmail,
-                    o.CustomerAddress
+                    u.Id,
+                    CustomerFullName = u.FirstName + " " + u.LastName,
+                    u.Phone,
+                    u.Email,
+                    u.CurrentCity
                 })
-                .Select(g => new CustomerSearchDto
+                .ToListAsync();
+
+            // Get order counts and last order dates for these customers
+            var customerIds = customers.Select(c => c.Id).ToList();
+            var orderStats = await _context.Orders
+                .Where(o => customerIds.Contains(o.CustomerId))
+                .GroupBy(o => o.CustomerId)
+                .Select(g => new
                 {
-                    CustomerFullName = g.Key.CustomerFullName ?? string.Empty,
-                    CustomerPhone = g.Key.CustomerPhone,
-                    CustomerEmail = g.Key.CustomerEmail,
-                    CustomerAddress = g.Key.CustomerAddress,
+                    CustomerId = g.Key,
                     OrderCount = g.Count(),
                     LastOrderDate = g.Max(o => o.Date)
                 })
-                .OrderByDescending(c => c.LastOrderDate)
-                .Take(20) // Limit to 20 results
-                .ToListAsync();
+                .ToDictionaryAsync(x => x.CustomerId, x => x);
 
-            return customers;
+            return customers.Select(c => new CustomerSearchDto
+            {
+                CustomerFullName = c.CustomerFullName,
+                CustomerPhone = c.Phone,
+                CustomerEmail = c.Email,
+                CustomerAddress = c.CurrentCity,
+                OrderCount = orderStats.ContainsKey(c.Id) ? orderStats[c.Id].OrderCount : 0,
+                LastOrderDate = orderStats.ContainsKey(c.Id) ? orderStats[c.Id].LastOrderDate : DateTime.MinValue
+            }).OrderByDescending(c => c.LastOrderDate)
+              .Take(20)
+              .ToList();
         }
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

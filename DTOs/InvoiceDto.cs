@@ -8,8 +8,12 @@ namespace POS.Api.DTOs
         public DateTime InvoiceDate { get; set; }
         public DateTime DueDate { get; set; }
         public string Status { get; set; } = string.Empty;
+        public decimal TotalAmount { get; set; }
+        public decimal AmountPaid { get; set; }
+        public decimal Balance { get; set; }
         public OrderDto Order { get; set; } = null!;
         public ShopConfigurationDto ShopConfig { get; set; } = null!;
+        public List<InvoiceItemDto> Items { get; set; } = new List<InvoiceItemDto>();
     }
 
     public class CreateInvoiceDto

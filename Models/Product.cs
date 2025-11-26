@@ -47,6 +47,10 @@ namespace POS.Api.Models
 
         public int ProductUnitStock { get; set; }
 
+        public int StockThreshold { get; set; } = 10;
+
+        public byte[]? ProductImage { get; set; }
+
         // Navigation properties
         [ForeignKey("BrandId")]
         public virtual Brand? Brand { get; set; }

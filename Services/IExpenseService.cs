@@ -6,10 +6,11 @@ namespace POS.Api.Services
     {
         Task<IEnumerable<ExpenseDto>> GetAllExpensesAsync();
         Task<ExpenseDto?> GetExpenseByIdAsync(int id);
-        Task<ExpenseDto> CreateExpenseAsync(CreateExpenseDto createExpenseDto);
+        Task<ExpenseDto> CreateExpenseAsync(CreateExpenseDto createExpenseDto, string createdBy);
         Task<bool> UpdateExpenseAsync(int id, CreateExpenseDto updateExpenseDto);
         Task<bool> DeleteExpenseAsync(int id);
     }
 }
+
 
 

@@ -36,16 +36,36 @@ namespace POS.Api.Controllers
 
         [HttpPost]
         [Authorize(Roles = "Admin")]
-        public async Task<ActionResult<ProductDto>> CreateProduct([FromBody] CreateProductDto createProductDto)
+        public async Task<ActionResult<ProductDto>> CreateProduct([FromForm] CreateProductDto createProductDto, [FromForm] IFormFile? image = null)
         {
+            // Handle image file upload if provided
+            if (image != null && image.Length > 0)
+            {
+                using (var memoryStream = new MemoryStream())
+                {
+                    await image.CopyToAsync(memoryStream);
+                    createProductDto.ProductImageBase64 = Convert.ToBase64String(memoryStream.ToArray());
+                }
+            }
+
             var product = await _productService.CreateProductAsync(createProductDto);
             return CreatedAtAction(nameof(GetProduct), new { id = product.ProductId }, product);
         }
 
         [HttpPut("{id}")]
         [Authorize(Roles = "Admin")]
-        public async Task<IActionResult> UpdateProduct(int id, [FromBody] UpdateProductDto updateProductDto)
+        public async Task<IActionResult> UpdateProduct(int id, [FromForm] UpdateProductDto updateProductDto, [FromForm] IFormFile? image = null)
         {
+            // Handle image file upload if provided
+            if (image != null && image.Length > 0)
+            {
+                using (var memoryStream = new MemoryStream())
+                {
+                    await image.CopyToAsync(memoryStream);
+                    updateProductDto.ProductImageBase64 = Convert.ToBase64String(memoryStream.ToArray());
+                }
+            }
+
             var result = await _productService.UpdateProductAsync(id, updateProductDto);
             if (!result)
                 return NotFound();
