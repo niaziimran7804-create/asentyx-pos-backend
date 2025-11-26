@@ -29,6 +29,7 @@ namespace POS.Api.Data
         public DbSet<DailySales> DailySales { get; set; }
         public DbSet<Return> Returns { get; set; }
         public DbSet<ReturnItem> ReturnItems { get; set; }
+        public DbSet<CustomerLedger> CustomerLedgers { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -190,6 +191,41 @@ namespace POS.Api.Data
 
             modelBuilder.Entity<ReturnItem>()
                 .HasCheckConstraint("CHK_ReturnAmount", "ReturnAmount >= 0");
+
+            // Customer Ledger relationships
+            modelBuilder.Entity<CustomerLedger>()
+                .HasOne(cl => cl.Customer)
+                .WithMany()
+                .HasForeignKey(cl => cl.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<CustomerLedger>()
+                .HasOne(cl => cl.Invoice)
+                .WithMany()
+                .HasForeignKey(cl => cl.InvoiceId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<CustomerLedger>()
+                .HasOne(cl => cl.Order)
+                .WithMany()
+                .HasForeignKey(cl => cl.OrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<CustomerLedger>()
+                .HasOne(cl => cl.Return)
+                .WithMany()
+                .HasForeignKey(cl => cl.ReturnId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Customer Ledger indexes
+            modelBuilder.Entity<CustomerLedger>()
+                .HasIndex(cl => cl.CustomerId);
+
+            modelBuilder.Entity<CustomerLedger>()
+                .HasIndex(cl => cl.TransactionDate);
+
+            modelBuilder.Entity<CustomerLedger>()
+                .HasIndex(cl => cl.TransactionType);
         }
     }
 }

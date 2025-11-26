@@ -201,5 +201,52 @@ namespace POS.Api.Controllers
                 return StatusCode(500, new { error = "An error occurred while fetching sales graph data" });
             }
         }
+        [HttpGet("payment-methods")]
+        public async Task<ActionResult<List<PaymentMethodSummaryDto>>> GetPaymentMethods(
+           [FromQuery] DateTime? startDate = null,
+           [FromQuery] DateTime? endDate = null)
+        {
+            try
+            {
+                var result = await _accountingService.GetPaymentMethodsSummaryAsync(startDate, endDate);
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new
+                {
+                    error = "Internal server error",
+                    message = ex.Message,
+                    statusCode = 500,
+                    timestamp = DateTime.UtcNow
+                });
+            }
+        }
+
+        /// <summary>
+        /// Get top performing products
+        /// </summary>
+        [HttpGet("top-products")]
+        public async Task<ActionResult<List<TopProductDto>>> GetTopProducts(
+            [FromQuery] int limit = 10,
+            [FromQuery] DateTime? startDate = null,
+            [FromQuery] DateTime? endDate = null)
+        {
+            try
+            {
+                var result = await _accountingService.GetTopProductsAsync(limit, startDate, endDate);
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new
+                {
+                    error = "Internal server error",
+                    message = ex.Message,
+                    statusCode = 500,
+                    timestamp = DateTime.UtcNow
+                });
+            }
+        }
     }
 }

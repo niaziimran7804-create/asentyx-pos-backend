@@ -185,6 +185,7 @@ namespace POS.Api.Services
             {
                 TotalIncome = totalIncome,
                 TotalExpenses = totalExpenses,
+                TotalRefunds = totalRefunds,
                 NetProfit = netProfit,
                 TotalSales = totalSales,
                 TotalPurchases = totalPurchases,
@@ -250,6 +251,7 @@ namespace POS.Api.Services
                     TotalSales = totalSales,
                     TotalOrders = totalOrders,
                     TotalExpenses = totalExpenses,
+                    TotalRefunds = totalRefunds,
                     NetProfit = totalSales - totalExpenses - totalRefunds,
                     CashSales = sales?.CashSales ?? 0,
                     CardSales = sales?.CardSales ?? 0,
@@ -305,6 +307,18 @@ namespace POS.Api.Services
                 })
                 .ToDictionaryAsync(x => x.Date, x => x.TotalExpenses);
 
+            // Get refunds data
+            var refundsData = await _context.AccountingEntries
+                .Where(e => e.EntryDate >= startDate && e.EntryDate <= endDate.AddDays(1).AddTicks(-1) && 
+                       e.EntryType == EntryType.Refund)
+                .GroupBy(e => e.EntryDate.Date)
+                .Select(g => new
+                {
+                    Date = g.Key,
+                    TotalRefunds = g.Sum(e => e.Amount)
+                })
+                .ToDictionaryAsync(x => x.Date, x => x.TotalRefunds);
+
             // Build result with all dates in range
             var result = new SalesGraphDto();
 
@@ -321,8 +335,12 @@ namespace POS.Api.Services
                 var dailyExpenses = expensesData.ContainsKey(date) ? expensesData[date] : 0m;
                 result.ExpensesData.Add(dailyExpenses);
 
-                // Calculate profit (sales - expenses)
-                result.ProfitData.Add(dailySales - dailyExpenses);
+                // Get refunds for this day (0 if no refunds)
+                var dailyRefunds = refundsData.ContainsKey(date) ? refundsData[date] : 0m;
+                result.RefundsData.Add(dailyRefunds);
+
+                // Calculate profit (sales - expenses - refunds)
+                result.ProfitData.Add(dailySales - dailyExpenses - dailyRefunds);
 
                 // Get order count for this day (0 if no orders)
                 var dailyOrders = salesData.ContainsKey(date) ? salesData[date].TotalOrders : 0;
