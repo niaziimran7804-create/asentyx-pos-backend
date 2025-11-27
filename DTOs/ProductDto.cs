@@ -32,9 +32,7 @@ namespace POS.Api.DTOs
         public decimal ProductMSRP { get; set; }
         public string ProductStatus { get; set; } = "YES";
         public decimal ProductDiscountRate { get; set; }
-        public string? ProductSize { get; set; }
         public string? ProductColor { get; set; }
-        public decimal ProductWeight { get; set; }
         public int ProductUnitStock { get; set; }
         public int StockThreshold { get; set; } = 10;
         public string? ProductImageBase64 { get; set; }

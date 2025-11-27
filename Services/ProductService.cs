@@ -97,9 +97,7 @@ namespace POS.Api.Services
                 ProductMSRP = createProductDto.ProductMSRP,
                 ProductStatus = createProductDto.ProductStatus,
                 ProductDiscountRate = createProductDto.ProductDiscountRate,
-                ProductSize = createProductDto.ProductSize,
                 ProductColor = createProductDto.ProductColor,
-                ProductWeight = createProductDto.ProductWeight,
                 ProductUnitStock = createProductDto.ProductUnitStock,
                 StockThreshold = createProductDto.StockThreshold,
                 ProductImage = !string.IsNullOrEmpty(createProductDto.ProductImageBase64) 
