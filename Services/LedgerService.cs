@@ -325,7 +325,7 @@ namespace POS.Api.Services
             // Get all unpaid invoices
             var unpaidInvoices = await _context.Invoices
                 .Include(i => i.Order)
-                .Where(i => i.Order.CustomerId == customerId && i.Balance > 0 && i.InvoiceDate <= reportDate)
+                .Where(i => i.Order.CustomerId == customerId && i.Balance > 0 && i.DueDate <= reportDate)
                 .ToListAsync();
 
             var aging = new CustomerAgingDto
