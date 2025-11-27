@@ -16,7 +16,7 @@ namespace POS.Api.Services
             _logger = logger;
         }
 
-        public async Task<bool> SendLowStockAlertAsync(string productName, int currentStock, int threshold)
+        public async Task<bool> SendLowStockAlertAsync(string productName, decimal currentStock, int threshold)
         {
             var subject = $"?? Low Stock Alert: {productName}";
             var body = $@"

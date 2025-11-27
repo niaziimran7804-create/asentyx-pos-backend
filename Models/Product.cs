@@ -37,7 +37,7 @@ namespace POS.Api.Models
       
 
 
-        public int ProductUnitStock { get; set; }
+        public decimal ProductUnitStock { get; set; }
 
         public int StockThreshold { get; set; } = 10;
 
