@@ -15,14 +15,12 @@ namespace POS.Api.Models
         [StringLength(255)]
         public string ProductName { get; set; } = string.Empty;
 
-        [Required]
-        public int BrandId { get; set; }
+        public int? BrandId { get; set; }  // Made nullable
 
         [StringLength(1000)]
         public string? ProductDescription { get; set; }
 
-        [Column(TypeName = "decimal(18,2)")]
-        public decimal ProductQuantityPerUnit { get; set; }
+        public int ProductQuantityPerUnit { get; set; }
 
         [Column(TypeName = "decimal(18,2)")]
         public decimal ProductPerUnitPrice { get; set; }
@@ -36,8 +34,8 @@ namespace POS.Api.Models
         [Column(TypeName = "decimal(18,2)")]
         public decimal ProductDiscountRate { get; set; }
 
-        [Column(TypeName = "decimal(18,2)")]
-        public decimal ProductSize { get; set; }
+        [StringLength(50)]
+        public string? ProductSize { get; set; }
 
         [StringLength(50)]
         public string? ProductColor { get; set; }

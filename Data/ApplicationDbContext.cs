@@ -40,7 +40,8 @@ namespace POS.Api.Data
                 .HasOne(p => p.Brand)
                 .WithMany(b => b.Products)
                 .HasForeignKey(p => p.BrandId)
-                .OnDelete(DeleteBehavior.Restrict);
+                .OnDelete(DeleteBehavior.Restrict)
+                .IsRequired(false);  // Make Brand optional
 
             modelBuilder.Entity<Brand>()
                 .HasOne(b => b.Vendor)
