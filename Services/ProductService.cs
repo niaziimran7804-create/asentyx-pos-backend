@@ -44,7 +44,6 @@ namespace POS.Api.Services
                 ProductStatus = p.ProductStatus,
                 ProductDiscountRate = p.ProductDiscountRate,
               
-                ProductWeight = p.ProductWeight,
                 ProductUnitStock = p.ProductUnitStock,
                 StockThreshold = p.StockThreshold,
                 BrandName = p.Brand?.BrandName,
@@ -74,7 +73,6 @@ namespace POS.Api.Services
                 ProductStatus = product.ProductStatus,
                 ProductDiscountRate = product.ProductDiscountRate,
                
-                ProductWeight = product.ProductWeight,
                 ProductUnitStock = product.ProductUnitStock,
                 StockThreshold = product.StockThreshold,
                 BrandName = product.Brand?.BrandName,
@@ -95,7 +93,7 @@ namespace POS.Api.Services
                 ProductMSRP = createProductDto.ProductMSRP,
                 ProductStatus = createProductDto.ProductStatus,
                 ProductDiscountRate = createProductDto.ProductDiscountRate,
-             
+              
                 ProductUnitStock = createProductDto.ProductUnitStock,
                 StockThreshold = createProductDto.StockThreshold,
                 ProductImage = !string.IsNullOrEmpty(createProductDto.ProductImageBase64) 
@@ -123,8 +121,7 @@ namespace POS.Api.Services
             product.ProductMSRP = updateProductDto.ProductMSRP;
             product.ProductStatus = updateProductDto.ProductStatus;
             product.ProductDiscountRate = updateProductDto.ProductDiscountRate;
-           
-            product.ProductWeight = updateProductDto.ProductWeight;
+          
             product.ProductUnitStock = updateProductDto.ProductUnitStock;
             product.StockThreshold = updateProductDto.StockThreshold;
 
@@ -226,5 +223,28 @@ namespace POS.Api.Services
         }
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
