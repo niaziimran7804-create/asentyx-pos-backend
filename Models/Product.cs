@@ -20,7 +20,7 @@ namespace POS.Api.Models
         [StringLength(1000)]
         public string? ProductDescription { get; set; }
 
-        public int ProductQuantityPerUnit { get; set; }
+        public decimal ProductQuantityPerUnit { get; set; }
 
         [Column(TypeName = "decimal(18,2)")]
         public decimal ProductPerUnitPrice { get; set; }
@@ -37,7 +37,7 @@ namespace POS.Api.Models
       
 
 
-        public decimal ProductUnitStock { get; set; }
+        public int ProductUnitStock { get; set; }
 
         public int StockThreshold { get; set; } = 10;
 

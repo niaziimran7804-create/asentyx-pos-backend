@@ -7,7 +7,7 @@ namespace POS.Api.DTOs
         public string ProductName { get; set; } = string.Empty;
         public int? BrandId { get; set; }  // Made nullable
         public string? ProductDescription { get; set; }
-        public int ProductQuantityPerUnit { get; set; }
+        public decimal ProductQuantityPerUnit { get; set; }
         public decimal ProductPerUnitPrice { get; set; }
         public decimal ProductMSRP { get; set; }
         public string ProductStatus { get; set; } = string.Empty;
@@ -48,7 +48,7 @@ namespace POS.Api.DTOs
         public string? ProductSize { get; set; }
         public string? ProductColor { get; set; }
         public decimal ProductWeight { get; set; }
-        public decimal ProductUnitStock { get; set; }
+        public int ProductUnitStock { get; set; }
         public int StockThreshold { get; set; }
         public string? ProductImageBase64 { get; set; }
     }
