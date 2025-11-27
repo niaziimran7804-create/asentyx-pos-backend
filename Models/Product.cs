@@ -35,10 +35,10 @@ namespace POS.Api.Models
         public decimal ProductDiscountRate { get; set; }
 
         [StringLength(50)]
-        public string? ProductSize { get; set; }
+        public decimal? ProductSize { get; set; }
 
         [StringLength(50)]
-        public string? ProductColor { get; set; }
+        public decimal? ProductColor { get; set; }
 
         [Column(TypeName = "decimal(18,2)")]
         public decimal ProductWeight { get; set; }

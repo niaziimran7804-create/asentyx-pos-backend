@@ -43,8 +43,7 @@ namespace POS.Api.Services
                 ProductMSRP = p.ProductMSRP,
                 ProductStatus = p.ProductStatus,
                 ProductDiscountRate = p.ProductDiscountRate,
-                ProductSize = p.ProductSize,
-                ProductColor = p.ProductColor,
+              
                 ProductWeight = p.ProductWeight,
                 ProductUnitStock = p.ProductUnitStock,
                 StockThreshold = p.StockThreshold,
@@ -74,8 +73,7 @@ namespace POS.Api.Services
                 ProductMSRP = product.ProductMSRP,
                 ProductStatus = product.ProductStatus,
                 ProductDiscountRate = product.ProductDiscountRate,
-                ProductSize = product.ProductSize,
-                ProductColor = product.ProductColor,
+               
                 ProductWeight = product.ProductWeight,
                 ProductUnitStock = product.ProductUnitStock,
                 StockThreshold = product.StockThreshold,
@@ -97,7 +95,7 @@ namespace POS.Api.Services
                 ProductMSRP = createProductDto.ProductMSRP,
                 ProductStatus = createProductDto.ProductStatus,
                 ProductDiscountRate = createProductDto.ProductDiscountRate,
-                ProductColor = createProductDto.ProductColor,
+             
                 ProductUnitStock = createProductDto.ProductUnitStock,
                 StockThreshold = createProductDto.StockThreshold,
                 ProductImage = !string.IsNullOrEmpty(createProductDto.ProductImageBase64) 
@@ -125,8 +123,7 @@ namespace POS.Api.Services
             product.ProductMSRP = updateProductDto.ProductMSRP;
             product.ProductStatus = updateProductDto.ProductStatus;
             product.ProductDiscountRate = updateProductDto.ProductDiscountRate;
-            product.ProductSize = updateProductDto.ProductSize;
-            product.ProductColor = updateProductDto.ProductColor;
+           
             product.ProductWeight = updateProductDto.ProductWeight;
             product.ProductUnitStock = updateProductDto.ProductUnitStock;
             product.StockThreshold = updateProductDto.StockThreshold;
