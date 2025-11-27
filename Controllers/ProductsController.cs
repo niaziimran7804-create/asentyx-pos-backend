@@ -36,7 +36,7 @@ namespace POS.Api.Controllers
 
         [HttpPost]
         [Authorize(Roles = "Admin")]
-        public async Task<ActionResult<ProductDto>> CreateProduct([FromForm] CreateProductDto createProductDto, [FromForm] IFormFile? image = null)
+        public async Task<ActionResult<ProductDto>> CreateProduct([FromBody] CreateProductDto createProductDto, [FromForm] IFormFile? image = null)
         {
             // Handle image file upload if provided
             if (image != null && image.Length > 0)
@@ -54,7 +54,7 @@ namespace POS.Api.Controllers
 
         [HttpPut("{id}")]
         [Authorize(Roles = "Admin")]
-        public async Task<IActionResult> UpdateProduct(int id, [FromForm] UpdateProductDto updateProductDto, [FromForm] IFormFile? image = null)
+        public async Task<IActionResult> UpdateProduct(int id, [FromBody] UpdateProductDto updateProductDto, [FromForm] IFormFile? image = null)
         {
             // Handle image file upload if provided
             if (image != null && image.Length > 0)
