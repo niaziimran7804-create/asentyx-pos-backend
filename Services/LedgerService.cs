@@ -2,16 +2,19 @@ using Microsoft.EntityFrameworkCore;
 using POS.Api.Data;
 using POS.Api.DTOs;
 using POS.Api.Models;
+using POS.Api.Middleware;
 
 namespace POS.Api.Services
 {
     public class LedgerService : ILedgerService
     {
         private readonly ApplicationDbContext _context;
+        private readonly TenantContext _tenantContext;
 
-        public LedgerService(ApplicationDbContext context)
+        public LedgerService(ApplicationDbContext context, TenantContext tenantContext)
         {
             _context = context;
+            _tenantContext = tenantContext;
         }
 
         public async Task<CustomerLedgerDto> CreateLedgerEntryAsync(CreateLedgerEntryDto dto, string createdBy)
@@ -38,7 +41,9 @@ namespace POS.Api.Services
                 ReferenceNumber = dto.ReferenceNumber,
                 Notes = dto.Notes,
                 CreatedBy = createdBy,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                CompanyId = _tenantContext.CompanyId,
+                BranchId = _tenantContext.BranchId
             };
 
             _context.CustomerLedgers.Add(entry);
@@ -52,6 +57,16 @@ namespace POS.Api.Services
             var query = _context.CustomerLedgers
                 .Include(l => l.Customer)
                 .Where(l => l.CustomerId == customerId);
+
+            // Filter by branch if user has a branch assignment
+            if (_tenantContext.BranchId.HasValue)
+            {
+                query = query.Where(l => l.BranchId == _tenantContext.BranchId.Value);
+            }
+            else if (_tenantContext.CompanyId.HasValue)
+            {
+                query = query.Where(l => l.CompanyId == _tenantContext.CompanyId.Value);
+            }
 
             if (startDate.HasValue)
                 query = query.Where(l => l.TransactionDate >= startDate.Value);
@@ -110,8 +125,20 @@ namespace POS.Api.Services
 
         public async Task<decimal> GetCustomerBalanceAsync(int customerId)
         {
-            var lastEntry = await _context.CustomerLedgers
-                .Where(l => l.CustomerId == customerId)
+            var query = _context.CustomerLedgers
+                .Where(l => l.CustomerId == customerId);
+
+            // Filter by branch if user has a branch assignment
+            if (_tenantContext.BranchId.HasValue)
+            {
+                query = query.Where(l => l.BranchId == _tenantContext.BranchId.Value);
+            }
+            else if (_tenantContext.CompanyId.HasValue)
+            {
+                query = query.Where(l => l.CompanyId == _tenantContext.CompanyId.Value);
+            }
+
+            var lastEntry = await query
                 .OrderByDescending(l => l.TransactionDate)
                 .ThenByDescending(l => l.LedgerId)
                 .FirstOrDefaultAsync();
@@ -127,9 +154,20 @@ namespace POS.Api.Services
             if (customer == null)
                 throw new ArgumentException("Customer not found");
 
-            var ledgerEntries = await _context.CustomerLedgers
-                .Where(l => l.CustomerId == customerId)
-                .ToListAsync();
+            var query = _context.CustomerLedgers
+                .Where(l => l.CustomerId == customerId);
+
+            // Filter by branch if user has a branch assignment
+            if (_tenantContext.BranchId.HasValue)
+            {
+                query = query.Where(l => l.BranchId == _tenantContext.BranchId.Value);
+            }
+            else if (_tenantContext.CompanyId.HasValue)
+            {
+                query = query.Where(l => l.CompanyId == _tenantContext.CompanyId.Value);
+            }
+
+            var ledgerEntries = await query.ToListAsync();
 
             var currentBalance = await GetCustomerBalanceAsync(customerId);
 
@@ -281,7 +319,19 @@ namespace POS.Api.Services
             var reportDate = asOfDate ?? DateTime.UtcNow.Date;
 
             // Get all customers with transactions
-            var customerIds = await _context.CustomerLedgers
+            var query = _context.CustomerLedgers.AsQueryable();
+
+            // Filter by branch if user has a branch assignment
+            if (_tenantContext.BranchId.HasValue)
+            {
+                query = query.Where(l => l.BranchId == _tenantContext.BranchId.Value);
+            }
+            else if (_tenantContext.CompanyId.HasValue)
+            {
+                query = query.Where(l => l.CompanyId == _tenantContext.CompanyId.Value);
+            }
+
+            var customerIds = await query
                 .Select(l => l.CustomerId)
                 .Distinct()
                 .ToListAsync();
@@ -323,10 +373,21 @@ namespace POS.Api.Services
                 throw new ArgumentException("Customer not found");
 
             // Get all unpaid invoices
-            var unpaidInvoices = await _context.Invoices
+            var invoicesQuery = _context.Invoices
                 .Include(i => i.Order)
-                .Where(i => i.Order.CustomerId == customerId && i.Balance > 0 && i.DueDate <= reportDate)
-                .ToListAsync();
+                .Where(i => i.Order.CustomerId == customerId && i.Balance > 0 && i.DueDate <= reportDate);
+
+            // Filter by branch if user has a branch assignment
+            if (_tenantContext.BranchId.HasValue)
+            {
+                invoicesQuery = invoicesQuery.Where(i => i.Order != null && i.Order.BranchId == _tenantContext.BranchId.Value);
+            }
+            else if (_tenantContext.CompanyId.HasValue)
+            {
+                invoicesQuery = invoicesQuery.Where(i => i.Order != null && i.Order.CompanyId == _tenantContext.CompanyId.Value);
+            }
+
+            var unpaidInvoices = await invoicesQuery.ToListAsync();
 
             var aging = new CustomerAgingDto
             {

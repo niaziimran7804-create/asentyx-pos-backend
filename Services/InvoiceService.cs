@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using POS.Api.Data;
 using POS.Api.DTOs;
 using POS.Api.Models;
+using POS.Api.Middleware;
 using System.Text;
 
 namespace POS.Api.Services
@@ -9,10 +10,12 @@ namespace POS.Api.Services
     public class InvoiceService : IInvoiceService
     {
         private readonly ApplicationDbContext _context;
+        private readonly TenantContext _tenantContext;
 
-        public InvoiceService(ApplicationDbContext context)
+        public InvoiceService(ApplicationDbContext context, TenantContext tenantContext)
         {
             _context = context;
+            _tenantContext = tenantContext;
         }
 
         public async Task<InvoiceDto> CreateInvoiceAsync(CreateInvoiceDto createInvoiceDto)
@@ -130,14 +133,26 @@ namespace POS.Api.Services
             // Filter for last 14 days only
             var fourteenDaysAgo = DateTime.UtcNow.AddDays(-14);
             
-            var invoices = await _context.Invoices
+            var query = _context.Invoices
                 .Include(i => i.Order)
                     .ThenInclude(o => o.Customer)
                 .Include(i => i.Order)
                     .ThenInclude(o => o.OrderProductMaps)
                         .ThenInclude(opm => opm.Product)
                 .Where(i => i.InvoiceDate >= fourteenDaysAgo) // Filter last 14 days
-                .ToListAsync();
+                .AsQueryable();
+
+            // Filter by branch if user has a branch assignment
+            if (_tenantContext.BranchId.HasValue)
+            {
+                query = query.Where(i => i.Order != null && i.Order.BranchId == _tenantContext.BranchId.Value);
+            }
+            else if (_tenantContext.CompanyId.HasValue)
+            {
+                query = query.Where(i => i.Order != null && i.Order.CompanyId == _tenantContext.CompanyId.Value);
+            }
+
+            var invoices = await query.ToListAsync();
 
             var shopConfig = await GetShopConfigurationAsync();
             var result = new List<InvoiceDto>();
@@ -198,6 +213,16 @@ namespace POS.Api.Services
                     .ThenInclude(o => o.OrderProductMaps)
                         .ThenInclude(opm => opm.Product)
                 .AsQueryable();
+
+            // Filter by branch if user has a branch assignment
+            if (_tenantContext.BranchId.HasValue)
+            {
+                query = query.Where(i => i.Order != null && i.Order.BranchId == _tenantContext.BranchId.Value);
+            }
+            else if (_tenantContext.CompanyId.HasValue)
+            {
+                query = query.Where(i => i.Order != null && i.Order.CompanyId == _tenantContext.CompanyId.Value);
+            }
 
             // Filter by amount
             if (filter.MinAmount.HasValue)
