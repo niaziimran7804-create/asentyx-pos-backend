@@ -15,6 +15,13 @@ namespace POS.Api.Models
         [StringLength(50)]
         public string InvoiceNumber { get; set; } = string.Empty;
 
+        [StringLength(20)]
+        public string InvoiceType { get; set; } = "Invoice"; // Invoice, CreditNote
+
+        public int? OriginalInvoiceId { get; set; }
+
+        public int? ReturnId { get; set; }
+
         [Required]
         public DateTime InvoiceDate { get; set; } = DateTime.UtcNow;
 
@@ -35,6 +42,12 @@ namespace POS.Api.Models
         // Navigation properties
         [ForeignKey("OrderId")]
         public virtual Order? Order { get; set; }
+
+        [ForeignKey("OriginalInvoiceId")]
+        public virtual Invoice? OriginalInvoice { get; set; }
+
+        [ForeignKey("ReturnId")]
+        public virtual Return? Return { get; set; }
 
         public virtual ICollection<InvoicePayment> Payments { get; set; } = new List<InvoicePayment>();
     }

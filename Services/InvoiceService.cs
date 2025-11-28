@@ -76,6 +76,9 @@ namespace POS.Api.Services
                 InvoiceId = invoice.InvoiceId,
                 OrderId = invoice.OrderId,
                 InvoiceNumber = invoice.InvoiceNumber,
+                InvoiceType = invoice.InvoiceType,
+                OriginalInvoiceId = invoice.OriginalInvoiceId,
+                ReturnId = invoice.ReturnId,
                 InvoiceDate = invoice.InvoiceDate,
                 DueDate = invoice.DueDate,
                 Status = invoice.Status,
@@ -800,6 +803,141 @@ namespace POS.Api.Services
             invoice.DueDate = dueDate;
             await _context.SaveChangesAsync();
             return true;
+        }
+
+        public async Task<CreditNoteDto> CreateCreditNoteInvoiceAsync(int returnId)
+        {
+            var returnEntity = await _context.Returns
+                .Include(r => r.Invoice)
+                    .ThenInclude(i => i!.Order)
+                        .ThenInclude(o => o.Customer)
+                .Include(r => r.ReturnItems)
+                    .ThenInclude(ri => ri.Product)
+                .FirstOrDefaultAsync(r => r.ReturnId == returnId);
+
+            if (returnEntity == null)
+                throw new ArgumentException("Return not found");
+
+            if (returnEntity.CreditNoteInvoiceId != null)
+                throw new InvalidOperationException("Credit note already exists for this return");
+
+            // Generate credit note number
+            var creditNoteNumber = await GenerateCreditNoteNumberAsync();
+
+            // Create credit note invoice
+            var creditNote = new Invoice
+            {
+                OrderId = returnEntity.OrderId,
+                InvoiceNumber = creditNoteNumber,
+                InvoiceType = "CreditNote",
+                OriginalInvoiceId = returnEntity.InvoiceId,
+                ReturnId = returnId,
+                InvoiceDate = DateTime.UtcNow,
+                DueDate = DateTime.UtcNow,
+                Status = "Issued",
+                TotalAmount = -returnEntity.TotalReturnAmount, // Negative amount for credit
+                AmountPaid = 0,
+                Balance = -returnEntity.TotalReturnAmount
+            };
+
+            _context.Invoices.Add(creditNote);
+            await _context.SaveChangesAsync();
+
+            // Update return with credit note ID
+            returnEntity.CreditNoteInvoiceId = creditNote.InvoiceId;
+            await _context.SaveChangesAsync();
+
+            // Build credit note DTO
+            var customer = returnEntity.Invoice?.Order?.Customer;
+            var creditNoteDto = new CreditNoteDto
+            {
+                CreditNoteId = creditNote.InvoiceId,
+                CreditNoteNumber = creditNote.InvoiceNumber,
+                CreditNoteDate = creditNote.InvoiceDate,
+                CreditAmount = returnEntity.TotalReturnAmount,
+                OriginalInvoiceId = returnEntity.InvoiceId,
+                OriginalInvoiceNumber = returnEntity.Invoice?.InvoiceNumber ?? "",
+                ReturnId = returnId,
+                CustomerName = customer != null ? $"{customer.FirstName} {customer.LastName}" : "",
+                CustomerPhone = customer?.Phone ?? "",
+                CustomerEmail = customer?.Email ?? "",
+                ReturnReason = returnEntity.ReturnReason,
+                Items = returnEntity.ReturnItems.Select(ri => new InvoiceItemDto
+                {
+                    ProductId = ri.ProductId,
+                    ProductName = ri.Product?.ProductName ?? "Unknown",
+                    Quantity = ri.ReturnQuantity,
+                    UnitPrice = ri.ReturnAmount / ri.ReturnQuantity,
+                    TotalPrice = ri.ReturnAmount
+                }).ToList()
+            };
+
+            return creditNoteDto;
+        }
+
+        public async Task<CreditNoteDto?> GetCreditNoteByReturnIdAsync(int returnId)
+        {
+            var returnEntity = await _context.Returns
+                .Include(r => r.CreditNoteInvoice)
+                .Include(r => r.Invoice)
+                    .ThenInclude(i => i!.Order)
+                        .ThenInclude(o => o.Customer)
+                .Include(r => r.ReturnItems)
+                    .ThenInclude(ri => ri.Product)
+                .FirstOrDefaultAsync(r => r.ReturnId == returnId);
+
+            if (returnEntity == null || returnEntity.CreditNoteInvoice == null)
+                return null;
+
+            var creditNote = returnEntity.CreditNoteInvoice;
+            var customer = returnEntity.Invoice?.Order?.Customer;
+
+            return new CreditNoteDto
+            {
+                CreditNoteId = creditNote.InvoiceId,
+                CreditNoteNumber = creditNote.InvoiceNumber,
+                CreditNoteDate = creditNote.InvoiceDate,
+                CreditAmount = returnEntity.TotalReturnAmount,
+                OriginalInvoiceId = returnEntity.InvoiceId,
+                OriginalInvoiceNumber = returnEntity.Invoice?.InvoiceNumber ?? "",
+                ReturnId = returnId,
+                CustomerName = customer != null ? $"{customer.FirstName} {customer.LastName}" : "",
+                CustomerPhone = customer?.Phone ?? "",
+                CustomerEmail = customer?.Email ?? "",
+                ReturnReason = returnEntity.ReturnReason,
+                Items = returnEntity.ReturnItems.Select(ri => new InvoiceItemDto
+                {
+                    ProductId = ri.ProductId,
+                    ProductName = ri.Product?.ProductName ?? "Unknown",
+                    Quantity = ri.ReturnQuantity,
+                    UnitPrice = ri.ReturnAmount / ri.ReturnQuantity,
+                    TotalPrice = ri.ReturnAmount
+                }).ToList()
+            };
+        }
+
+        private async Task<string> GenerateCreditNoteNumberAsync()
+        {
+            var year = DateTime.UtcNow.Year;
+            var month = DateTime.UtcNow.Month;
+            var prefix = $"CN-{year}{month:D2}";
+
+            var lastCreditNote = await _context.Invoices
+                .Where(i => i.InvoiceType == "CreditNote" && i.InvoiceNumber.StartsWith(prefix))
+                .OrderByDescending(i => i.InvoiceNumber)
+                .FirstOrDefaultAsync();
+
+            int sequence = 1;
+            if (lastCreditNote != null)
+            {
+                var parts = lastCreditNote.InvoiceNumber.Split('-');
+                if (parts.Length > 0 && int.TryParse(parts[^1], out int lastSeq))
+                {
+                    sequence = lastSeq + 1;
+                }
+            }
+
+            return $"{prefix}-{sequence:D4}";
         }
     }
 }

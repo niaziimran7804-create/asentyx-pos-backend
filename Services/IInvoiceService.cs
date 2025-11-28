@@ -22,6 +22,10 @@ namespace POS.Api.Services
         
         // Update due date
         Task<bool> UpdateDueDateAsync(int invoiceId, DateTime dueDate);
+
+        // Credit note methods
+        Task<CreditNoteDto> CreateCreditNoteInvoiceAsync(int returnId);
+        Task<CreditNoteDto?> GetCreditNoteByReturnIdAsync(int returnId);
     }
 }
 

@@ -5,6 +5,9 @@ namespace POS.Api.DTOs
         public int InvoiceId { get; set; }
         public int OrderId { get; set; }
         public string InvoiceNumber { get; set; } = string.Empty;
+        public string InvoiceType { get; set; } = "Invoice";
+        public int? OriginalInvoiceId { get; set; }
+        public int? ReturnId { get; set; }
         public DateTime InvoiceDate { get; set; }
         public DateTime DueDate { get; set; }
         public string Status { get; set; } = string.Empty;
@@ -44,6 +47,29 @@ namespace POS.Api.DTOs
     public class UpdateInvoiceDueDateDto
     {
         public DateTime DueDate { get; set; }
+    }
+
+    public class CreateCreditNoteDto
+    {
+        public int ReturnId { get; set; }
+        public int OriginalInvoiceId { get; set; }
+        public int OrderId { get; set; }
+    }
+
+    public class CreditNoteDto
+    {
+        public int CreditNoteId { get; set; }
+        public string CreditNoteNumber { get; set; } = string.Empty;
+        public DateTime CreditNoteDate { get; set; }
+        public decimal CreditAmount { get; set; }
+        public int OriginalInvoiceId { get; set; }
+        public string OriginalInvoiceNumber { get; set; } = string.Empty;
+        public int ReturnId { get; set; }
+        public string CustomerName { get; set; } = string.Empty;
+        public string CustomerPhone { get; set; } = string.Empty;
+        public string CustomerEmail { get; set; } = string.Empty;
+        public string ReturnReason { get; set; } = string.Empty;
+        public List<InvoiceItemDto> Items { get; set; } = new List<InvoiceItemDto>();
     }
 }
 

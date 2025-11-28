@@ -6,6 +6,8 @@ namespace POS.Api.DTOs
         public string ReturnType { get; set; } = string.Empty;
         public int InvoiceId { get; set; }
         public int OrderId { get; set; }
+        public int? CreditNoteInvoiceId { get; set; }
+        public string? CreditNoteNumber { get; set; }
         public DateTime ReturnDate { get; set; }
         public string ReturnStatus { get; set; } = string.Empty;
         public decimal TotalReturnAmount { get; set; }

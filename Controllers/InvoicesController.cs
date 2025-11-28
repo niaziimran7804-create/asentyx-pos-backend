@@ -246,6 +246,51 @@ namespace POS.Api.Controllers
                 return BadRequest(new { message = ex.Message });
             }
         }
+
+        /// <summary>
+        /// Create credit note invoice for a return
+        /// </summary>
+        [HttpPost("credit-note/return/{returnId}")]
+        public async Task<ActionResult<CreditNoteDto>> CreateCreditNoteForReturn(int returnId)
+        {
+            try
+            {
+                var creditNote = await _invoiceService.CreateCreditNoteInvoiceAsync(returnId);
+                return CreatedAtAction(nameof(GetCreditNoteByReturn), new { returnId }, creditNote);
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = "Failed to create credit note", details = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Get credit note by return ID
+        /// </summary>
+        [HttpGet("credit-note/return/{returnId}")]
+        public async Task<ActionResult<CreditNoteDto>> GetCreditNoteByReturn(int returnId)
+        {
+            try
+            {
+                var creditNote = await _invoiceService.GetCreditNoteByReturnIdAsync(returnId);
+                if (creditNote == null)
+                    return NotFound(new { message = "Credit note not found for this return" });
+
+                return Ok(creditNote);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = "Failed to retrieve credit note", details = ex.Message });
+            }
+        }
     }
 }
 

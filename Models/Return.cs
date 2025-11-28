@@ -44,6 +44,8 @@ namespace POS.Api.Models
 
         public DateTime? ProcessedDate { get; set; }
 
+        public int? CreditNoteInvoiceId { get; set; }
+
         [Required]
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
@@ -53,6 +55,7 @@ namespace POS.Api.Models
         public virtual Invoice? Invoice { get; set; }
         public virtual Order? Order { get; set; }
         public virtual User? ProcessedByUser { get; set; }
+        public virtual Invoice? CreditNoteInvoice { get; set; }
         public virtual ICollection<ReturnItem> ReturnItems { get; set; } = new List<ReturnItem>();
     }
 }
