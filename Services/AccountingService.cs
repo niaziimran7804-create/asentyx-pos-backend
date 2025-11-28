@@ -144,6 +144,13 @@ namespace POS.Api.Services
             if (entry == null)
                 return false;
 
+            // Verify branch ownership before deletion
+            if (_tenantContext.BranchId.HasValue && entry.BranchId != _tenantContext.BranchId.Value)
+                return false;
+            
+            if (_tenantContext.CompanyId.HasValue && entry.CompanyId != _tenantContext.CompanyId.Value)
+                return false;
+
             _context.AccountingEntries.Remove(entry);
             await _context.SaveChangesAsync();
             return true;

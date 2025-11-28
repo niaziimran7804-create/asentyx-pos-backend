@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using POS.Api.Data;
 using POS.Api.DTOs;
+using POS.Api.Middleware;
 
 namespace POS.Api.Services
 {
@@ -8,16 +9,30 @@ namespace POS.Api.Services
     {
         private readonly ApplicationDbContext _context;
         private readonly IAccountingService _accountingService;
+        private readonly TenantContext _tenantContext;
 
-        public ExpenseService(ApplicationDbContext context, IAccountingService accountingService)
+        public ExpenseService(ApplicationDbContext context, IAccountingService accountingService, TenantContext tenantContext)
         {
             _context = context;
             _accountingService = accountingService;
+            _tenantContext = tenantContext;
         }
 
         public async Task<IEnumerable<ExpenseDto>> GetAllExpensesAsync()
         {
-            var expenses = await _context.Expenses.ToListAsync();
+            var query = _context.Expenses.AsQueryable();
+
+            // Filter by branch if user has a branch assignment
+            if (_tenantContext.BranchId.HasValue)
+            {
+                query = query.Where(e => e.BranchId == _tenantContext.BranchId.Value);
+            }
+            else if (_tenantContext.CompanyId.HasValue)
+            {
+                query = query.Where(e => e.CompanyId == _tenantContext.CompanyId.Value);
+            }
+
+            var expenses = await query.ToListAsync();
             return expenses.Select(e => new ExpenseDto
             {
                 ExpenseId = e.ExpenseId,
@@ -31,6 +46,13 @@ namespace POS.Api.Services
         {
             var expense = await _context.Expenses.FindAsync(id);
             if (expense == null)
+                return null;
+
+            // Verify branch ownership
+            if (_tenantContext.BranchId.HasValue && expense.BranchId != _tenantContext.BranchId.Value)
+                return null;
+            
+            if (_tenantContext.CompanyId.HasValue && expense.CompanyId != _tenantContext.CompanyId.Value)
                 return null;
 
             return new ExpenseDto
@@ -48,7 +70,9 @@ namespace POS.Api.Services
             {
                 ExpenseName = createExpenseDto.ExpenseName,
                 ExpenseAmount = createExpenseDto.ExpenseAmount,
-                ExpenseDate = createExpenseDto.ExpenseDate
+                ExpenseDate = createExpenseDto.ExpenseDate,
+                CompanyId = _tenantContext.CompanyId,
+                BranchId = _tenantContext.BranchId
             };
 
             _context.Expenses.Add(expense);
@@ -73,6 +97,13 @@ namespace POS.Api.Services
             if (expense == null)
                 return false;
 
+            // Verify branch ownership
+            if (_tenantContext.BranchId.HasValue && expense.BranchId != _tenantContext.BranchId.Value)
+                return false;
+            
+            if (_tenantContext.CompanyId.HasValue && expense.CompanyId != _tenantContext.CompanyId.Value)
+                return false;
+
             expense.ExpenseName = updateExpenseDto.ExpenseName;
             expense.ExpenseAmount = updateExpenseDto.ExpenseAmount;
             expense.ExpenseDate = updateExpenseDto.ExpenseDate;
@@ -85,6 +116,13 @@ namespace POS.Api.Services
         {
             var expense = await _context.Expenses.FindAsync(id);
             if (expense == null)
+                return false;
+
+            // Verify branch ownership
+            if (_tenantContext.BranchId.HasValue && expense.BranchId != _tenantContext.BranchId.Value)
+                return false;
+            
+            if (_tenantContext.CompanyId.HasValue && expense.CompanyId != _tenantContext.CompanyId.Value)
                 return false;
 
             _context.Expenses.Remove(expense);
