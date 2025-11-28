@@ -10,17 +10,20 @@ namespace POS.Api.Services
         private readonly ApplicationDbContext _context;
         private readonly IProductService _productService;
         private readonly IAccountingService _accountingService;
+        private readonly IInvoiceService _invoiceService;
         private readonly ILogger<ReturnService> _logger;
 
         public ReturnService(
             ApplicationDbContext context,
             IProductService productService,
             IAccountingService accountingService,
+            IInvoiceService invoiceService,
             ILogger<ReturnService> logger)
         {
             _context = context;
             _productService = productService;
             _accountingService = accountingService;
+            _invoiceService = invoiceService;
             _logger = logger;
         }
 
@@ -309,6 +312,7 @@ namespace POS.Api.Services
                 .Include(r => r.Order)
                     .ThenInclude(o => o.Customer)
                 .Include(r => r.ProcessedByUser)
+                .Include(r => r.CreditNoteInvoice)
                 .Include(r => r.ReturnItems)
                     .ThenInclude(ri => ri.Product)
                 .OrderByDescending(r => r.ReturnDate)
@@ -324,6 +328,7 @@ namespace POS.Api.Services
                 .Include(r => r.Order)
                     .ThenInclude(o => o.Customer)
                 .Include(r => r.ProcessedByUser)
+                .Include(r => r.CreditNoteInvoice)
                 .Include(r => r.ReturnItems)
                     .ThenInclude(ri => ri.Product)
                 .FirstOrDefaultAsync(r => r.ReturnId == id);
@@ -362,6 +367,7 @@ namespace POS.Api.Services
                     "Invalid return status. Must be 'Pending', 'Approved', 'Completed', or 'Rejected'");
             }
 
+            var previousStatus = returnEntity.ReturnStatus;
             returnEntity.ReturnStatus = request.ReturnStatus;
             returnEntity.ProcessedBy = userId;
             returnEntity.ProcessedDate = DateTime.UtcNow;
@@ -372,6 +378,37 @@ namespace POS.Api.Services
             _logger.LogInformation(
                 "Return {ReturnId} status updated to {Status} by user {UserId}",
                 id, request.ReturnStatus, userId);
+
+            // Automatically create credit note invoice when status changes to "Completed"
+            if (request.ReturnStatus == "Completed" && previousStatus != "Completed")
+            {
+                try
+                {
+                    // Check if credit note already exists
+                    if (returnEntity.CreditNoteInvoiceId == null)
+                    {
+                        var creditNote = await _invoiceService.CreateCreditNoteInvoiceAsync(id);
+                        
+                        _logger.LogInformation(
+                            "Credit note {CreditNoteNumber} automatically created for return {ReturnId}",
+                            creditNote.CreditNoteNumber, id);
+                    }
+                    else
+                    {
+                        _logger.LogInformation(
+                            "Credit note already exists for return {ReturnId}, skipping creation",
+                            id);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, 
+                        "Failed to automatically create credit note for return {ReturnId}. " +
+                        "Credit note can be created manually later.", id);
+                    // Don't throw - allow status update to succeed even if credit note creation fails
+                    // Admin can manually create credit note later if needed
+                }
+            }
 
             return true;
         }
@@ -384,6 +421,8 @@ namespace POS.Api.Services
                 ReturnType = returnEntity.ReturnType,
                 InvoiceId = returnEntity.InvoiceId,
                 OrderId = returnEntity.OrderId,
+                CreditNoteInvoiceId = returnEntity.CreditNoteInvoiceId,
+                CreditNoteNumber = returnEntity.CreditNoteInvoice?.InvoiceNumber,
                 ReturnDate = returnEntity.ReturnDate,
                 ReturnStatus = returnEntity.ReturnStatus,
                 TotalReturnAmount = returnEntity.TotalReturnAmount,
