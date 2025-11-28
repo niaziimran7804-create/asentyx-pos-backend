@@ -36,5 +36,6 @@ namespace POS.Api.Services
         Task CreateSaleEntryFromOrderAsync(int orderId, string createdBy);
         Task CreateRefundEntryFromOrderAsync(int orderId, string createdBy);
         Task CreateExpenseEntryAsync(int expenseId, string createdBy);
+        Task CreatePaymentEntryAsync(int invoiceId, int paymentId, string createdBy);
     }
 }

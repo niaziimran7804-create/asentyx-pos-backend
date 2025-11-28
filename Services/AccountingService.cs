@@ -513,12 +513,23 @@ namespace POS.Api.Services
             if (order == null)
                 return;
 
-            // Check if entry already exists to avoid duplicates
+            // Verify order belongs to current branch (if branch isolation is active)
+            if (order.BranchId != _tenantContext.BranchId)
+            {
+                System.Diagnostics.Debug.WriteLine($"Cannot create sale entry: Order {orderId} belongs to branch {order.BranchId}, but current context is branch {_tenantContext.BranchId}");
+                return;
+            }
+
+            // Check if entry already exists for THIS BRANCH to avoid duplicates
             var existingEntry = await _context.AccountingEntries
                 .FirstOrDefaultAsync(e => e.EntryType == EntryType.Sale && 
-                                         e.Description.Contains($"Order #{orderId}"));
+                                         e.Description.Contains($"Order #{orderId}") &&
+                                         e.BranchId == order.BranchId);
             if (existingEntry != null)
+            {
+                System.Diagnostics.Debug.WriteLine($"Sale entry already exists for Order {orderId} in branch {order.BranchId}");
                 return;
+            }
 
             var entry = new AccountingEntry
             {
@@ -537,6 +548,8 @@ namespace POS.Api.Services
 
             _context.AccountingEntries.Add(entry);
             await _context.SaveChangesAsync();
+            
+            System.Diagnostics.Debug.WriteLine($"Created sale accounting entry for Order {orderId} in branch {order.BranchId}, Amount: {order.TotalAmount}");
         }
 
         public async Task CreateRefundEntryFromOrderAsync(int orderId, string createdBy)
@@ -548,6 +561,24 @@ namespace POS.Api.Services
 
             if (order == null)
                 return;
+
+            // Verify order belongs to current branch (if branch isolation is active)
+            if (order.BranchId != _tenantContext.BranchId)
+            {
+                System.Diagnostics.Debug.WriteLine($"Cannot create refund entry: Order {orderId} belongs to branch {order.BranchId}, but current context is branch {_tenantContext.BranchId}");
+                return;
+            }
+
+            // Check if entry already exists for THIS BRANCH to avoid duplicates
+            var existingEntry = await _context.AccountingEntries
+                .FirstOrDefaultAsync(e => e.EntryType == EntryType.Refund && 
+                                         e.Description.Contains($"Refund for Order #{orderId}") &&
+                                         e.BranchId == order.BranchId);
+            if (existingEntry != null)
+            {
+                System.Diagnostics.Debug.WriteLine($"Refund entry already exists for Order {orderId} in branch {order.BranchId}");
+                return;
+            }
 
             var productNames = order.OrderProductMaps.Any() 
                 ? string.Join(", ", order.OrderProductMaps.Select(opm => opm.Product?.ProductName ?? "Unknown"))
@@ -570,6 +601,8 @@ namespace POS.Api.Services
 
             _context.AccountingEntries.Add(entry);
             await _context.SaveChangesAsync();
+            
+            System.Diagnostics.Debug.WriteLine($"Created refund accounting entry for Order {orderId} in branch {order.BranchId}, Amount: {order.TotalAmount}");
         }
 
         public async Task CreateExpenseEntryAsync(int expenseId, string createdBy)
@@ -584,12 +617,23 @@ namespace POS.Api.Services
             if (expense == null)
                 return;
 
-            // Check if entry already exists to avoid duplicates
+            // Verify expense belongs to current branch
+            if (expense.BranchId != _tenantContext.BranchId.Value)
+            {
+                System.Diagnostics.Debug.WriteLine($"Cannot create expense entry: Expense {expenseId} belongs to branch {expense.BranchId}, but current context is branch {_tenantContext.BranchId}");
+                return;
+            }
+
+            // Check if entry already exists for THIS BRANCH to avoid duplicates
             var existingEntry = await _context.AccountingEntries
                 .FirstOrDefaultAsync(e => e.EntryType == EntryType.Expense && 
-                                         e.Description.Contains($"Expense #{expenseId}"));
+                                         e.Description.Contains($"Expense #{expenseId}") &&
+                                         e.BranchId == expense.BranchId);
             if (existingEntry != null)
+            {
+                System.Diagnostics.Debug.WriteLine($"Expense entry already exists for Expense {expenseId} in branch {expense.BranchId}");
                 return;
+            }
 
             var entry = new AccountingEntry
             {
@@ -608,6 +652,69 @@ namespace POS.Api.Services
 
             _context.AccountingEntries.Add(entry);
             await _context.SaveChangesAsync();
+            
+            System.Diagnostics.Debug.WriteLine($"Created expense accounting entry for Expense {expenseId} in branch {expense.BranchId}, Amount: {expense.ExpenseAmount}");
+        }
+
+        public async Task CreatePaymentEntryAsync(int invoiceId, int paymentId, string createdBy)
+        {
+            // Enforce strict branch isolation - cannot create without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                throw new InvalidOperationException("Cannot create payment entry without branch context.");
+            }
+
+            var payment = await _context.InvoicePayments
+                .Include(p => p.Invoice)
+                    .ThenInclude(i => i!.Order)
+                .FirstOrDefaultAsync(p => p.PaymentId == paymentId);
+
+            if (payment == null || payment.Invoice == null || payment.Invoice.Order == null)
+                return;
+
+            var order = payment.Invoice.Order;
+
+            // Verify payment belongs to current branch
+            if (order.BranchId != _tenantContext.BranchId.Value)
+            {
+                System.Diagnostics.Debug.WriteLine($"Cannot create payment entry: Payment {paymentId} for Invoice {invoiceId} belongs to branch {order.BranchId}, but current context is branch {_tenantContext.BranchId}");
+                return;
+            }
+
+            // Check if entry already exists for THIS PAYMENT to avoid duplicates
+            var existingEntry = await _context.AccountingEntries
+                .FirstOrDefaultAsync(e => e.EntryType == EntryType.Income && 
+                                         e.Description.Contains($"Payment #{paymentId}") &&
+                                         e.Description.Contains($"Invoice #{payment.Invoice.InvoiceNumber}") &&
+                                         e.BranchId == order.BranchId);
+            if (existingEntry != null)
+            {
+                System.Diagnostics.Debug.WriteLine($"Payment entry already exists for Payment {paymentId} on Invoice {payment.Invoice.InvoiceNumber} in branch {order.BranchId}");
+                return;
+            }
+
+            // Determine if this is a partial or full payment
+            var paymentType = payment.Invoice.Balance == 0 ? "Full Payment" : "Partial Payment";
+
+            var entry = new AccountingEntry
+            {
+                EntryType = EntryType.Income,
+                Amount = payment.Amount,
+                Description = $"{paymentType} #{paymentId} - Invoice #{payment.Invoice.InvoiceNumber} (Order #{order.OrderId})",
+                PaymentMethod = payment.PaymentMethod,
+                Category = "Payment Received",
+                EntryDate = payment.PaymentDate,
+                CreatedBy = createdBy,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                CompanyId = _tenantContext.CompanyId,
+                BranchId = _tenantContext.BranchId.Value
+            };
+
+            _context.AccountingEntries.Add(entry);
+            await _context.SaveChangesAsync();
+            
+            System.Diagnostics.Debug.WriteLine($"Created {paymentType.ToLower()} accounting entry for Payment {paymentId} on Invoice {payment.Invoice.InvoiceNumber} in branch {order.BranchId}, Amount: {payment.Amount}");
         }
     }
 }

@@ -11,11 +11,13 @@ namespace POS.Api.Services
     {
         private readonly ApplicationDbContext _context;
         private readonly TenantContext _tenantContext;
+        private readonly IAccountingService _accountingService;
 
-        public InvoiceService(ApplicationDbContext context, TenantContext tenantContext)
+        public InvoiceService(ApplicationDbContext context, TenantContext tenantContext, IAccountingService accountingService)
         {
             _context = context;
             _tenantContext = tenantContext;
+            _accountingService = accountingService;
         }
 
         public async Task<InvoiceDto> CreateInvoiceAsync(CreateInvoiceDto createInvoiceDto)
@@ -785,6 +787,16 @@ namespace POS.Api.Services
             }
 
             await _context.SaveChangesAsync();
+
+            // Create accounting entry for the payment
+            try
+            {
+                await _accountingService.CreatePaymentEntryAsync(invoiceId, payment.PaymentId, receivedBy);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to create accounting entry for payment {payment.PaymentId} on invoice {invoiceId}: {ex.Message}");
+            }
 
             return new InvoicePaymentDto
             {
