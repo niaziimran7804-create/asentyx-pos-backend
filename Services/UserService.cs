@@ -1,21 +1,34 @@
 using Microsoft.EntityFrameworkCore;
 using POS.Api.Data;
 using POS.Api.DTOs;
+using POS.Api.Middleware;
 
 namespace POS.Api.Services
 {
     public class UserService : IUserService
     {
         private readonly ApplicationDbContext _context;
+        private readonly TenantContext _tenantContext;
 
-        public UserService(ApplicationDbContext context)
+        public UserService(ApplicationDbContext context, TenantContext tenantContext)
         {
             _context = context;
+            _tenantContext = tenantContext;
         }
 
         public async Task<IEnumerable<UserDto>> GetAllUsersAsync()
         {
-            var users = await _context.Users.ToListAsync();
+            var query = _context.Users.AsQueryable();
+
+            // Filter by company for Company Admins
+            // Super Admins (no CompanyId) see all users
+            if (_tenantContext.CompanyId.HasValue)
+            {
+                query = query.Where(u => u.CompanyId == _tenantContext.CompanyId.Value);
+            }
+
+            var users = await query.ToListAsync();
+            
             return users.Select(u => new UserDto
             {
                 Id = u.Id,
@@ -35,13 +48,24 @@ namespace POS.Api.Services
                 CurrentCity = u.CurrentCity,
                 Division = u.Division,
                 BloodGroup = u.BloodGroup,
-                PostalCode = u.PostalCode
+                PostalCode = u.PostalCode,
+                CompanyId = u.CompanyId,
+                BranchId = u.BranchId
             });
         }
 
         public async Task<UserDto?> GetUserByIdAsync(int id)
         {
-            var user = await _context.Users.FindAsync(id);
+            var query = _context.Users.AsQueryable();
+
+            // Filter by company for Company Admins
+            if (_tenantContext.CompanyId.HasValue)
+            {
+                query = query.Where(u => u.CompanyId == _tenantContext.CompanyId.Value);
+            }
+
+            var user = await query.FirstOrDefaultAsync(u => u.Id == id);
+            
             if (user == null)
                 return null;
 
@@ -64,12 +88,26 @@ namespace POS.Api.Services
                 CurrentCity = user.CurrentCity,
                 Division = user.Division,
                 BloodGroup = user.BloodGroup,
-                PostalCode = user.PostalCode
+                PostalCode = user.PostalCode,
+                CompanyId = user.CompanyId,
+                BranchId = user.BranchId
             };
         }
 
         public async Task<UserDto> CreateUserAsync(CreateUserDto createUserDto)
         {
+            // Validate branch assignment is required
+            if (!createUserDto.BranchId.HasValue)
+            {
+                throw new InvalidOperationException("User must be assigned to a branch.");
+            }
+
+            // If Company Admin, enforce they can only create users in their company
+            if (_tenantContext.CompanyId.HasValue && createUserDto.CompanyId != _tenantContext.CompanyId.Value)
+            {
+                throw new InvalidOperationException("Cannot create user for another company.");
+            }
+
             var user = new Models.User
             {
                 UserId = createUserDto.UserId,
@@ -91,7 +129,7 @@ namespace POS.Api.Services
                 BloodGroup = createUserDto.BloodGroup,
                 PostalCode = createUserDto.PostalCode,
                 CompanyId = createUserDto.CompanyId,
-                BranchId = createUserDto.BranchId
+                BranchId = createUserDto.BranchId.Value
             };
 
             _context.Users.Add(user);
@@ -102,7 +140,16 @@ namespace POS.Api.Services
 
         public async Task<bool> UpdateUserAsync(int id, UpdateUserDto updateUserDto)
         {
-            var user = await _context.Users.FindAsync(id);
+            var query = _context.Users.AsQueryable();
+
+            // Filter by company for Company Admins
+            if (_tenantContext.CompanyId.HasValue)
+            {
+                query = query.Where(u => u.CompanyId == _tenantContext.CompanyId.Value);
+            }
+
+            var user = await query.FirstOrDefaultAsync(u => u.Id == id);
+            
             if (user == null)
                 return false;
 
@@ -127,7 +174,16 @@ namespace POS.Api.Services
 
         public async Task<bool> DeleteUserAsync(int id)
         {
-            var user = await _context.Users.FindAsync(id);
+            var query = _context.Users.AsQueryable();
+
+            // Filter by company for Company Admins
+            if (_tenantContext.CompanyId.HasValue)
+            {
+                query = query.Where(u => u.CompanyId == _tenantContext.CompanyId.Value);
+            }
+
+            var user = await query.FirstOrDefaultAsync(u => u.Id == id);
+            
             if (user == null)
                 return false;
 

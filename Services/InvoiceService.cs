@@ -20,14 +20,20 @@ namespace POS.Api.Services
 
         public async Task<InvoiceDto> CreateInvoiceAsync(CreateInvoiceDto createInvoiceDto)
         {
+            // Enforce strict branch isolation - cannot create invoice without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                throw new InvalidOperationException("Cannot create invoice without branch context. User must be assigned to a branch.");
+            }
+
             var order = await _context.Orders
                 .Include(o => o.Customer)
                 .Include(o => o.OrderProductMaps)
                     .ThenInclude(opm => opm.Product)
-                .FirstOrDefaultAsync(o => o.OrderId == createInvoiceDto.OrderId);
+                .FirstOrDefaultAsync(o => o.OrderId == createInvoiceDto.OrderId && o.BranchId == _tenantContext.BranchId.Value);
 
             if (order == null)
-                throw new ArgumentException("Order not found");
+                throw new ArgumentException("Order not found in your branch");
 
             // Check if invoice already exists for this order
             var existingInvoice = await _context.Invoices
@@ -61,13 +67,19 @@ namespace POS.Api.Services
 
         public async Task<InvoiceDto?> GetInvoiceByIdAsync(int id)
         {
+            // Enforce strict branch isolation - cannot view invoice without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return null;
+            }
+
             var invoice = await _context.Invoices
                 .Include(i => i.Order)
                     .ThenInclude(o => o.Customer)
                 .Include(i => i.Order)
                     .ThenInclude(o => o.OrderProductMaps)
                         .ThenInclude(opm => opm.Product)
-                .FirstOrDefaultAsync(i => i.InvoiceId == id);
+                .FirstOrDefaultAsync(i => i.InvoiceId == id && i.Order != null && i.Order.BranchId == _tenantContext.BranchId.Value);
 
             if (invoice == null || invoice.Order == null)
                 return null;
@@ -119,8 +131,15 @@ namespace POS.Api.Services
 
         public async Task<InvoiceDto?> GetInvoiceByOrderIdAsync(int orderId)
         {
+            // Enforce strict branch isolation - cannot view invoice without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return null;
+            }
+
             var invoice = await _context.Invoices
-                .FirstOrDefaultAsync(i => i.OrderId == orderId);
+                .Include(i => i.Order)
+                .FirstOrDefaultAsync(i => i.OrderId == orderId && i.Order != null && i.Order.BranchId == _tenantContext.BranchId.Value);
 
             if (invoice == null)
                 return null;
@@ -130,6 +149,12 @@ namespace POS.Api.Services
 
         public async Task<IEnumerable<InvoiceDto>> GetAllInvoicesAsync()
         {
+            // Enforce strict branch isolation - cannot view invoices without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return Enumerable.Empty<InvoiceDto>();
+            }
+
             // Filter for last 14 days only
             var fourteenDaysAgo = DateTime.UtcNow.AddDays(-14);
             
@@ -139,18 +164,7 @@ namespace POS.Api.Services
                 .Include(i => i.Order)
                     .ThenInclude(o => o.OrderProductMaps)
                         .ThenInclude(opm => opm.Product)
-                .Where(i => i.InvoiceDate >= fourteenDaysAgo) // Filter last 14 days
-                .AsQueryable();
-
-            // Filter by branch if user has a branch assignment
-            if (_tenantContext.BranchId.HasValue)
-            {
-                query = query.Where(i => i.Order != null && i.Order.BranchId == _tenantContext.BranchId.Value);
-            }
-            else if (_tenantContext.CompanyId.HasValue)
-            {
-                query = query.Where(i => i.Order != null && i.Order.CompanyId == _tenantContext.CompanyId.Value);
-            }
+                .Where(i => i.InvoiceDate >= fourteenDaysAgo && i.Order != null && i.Order.BranchId == _tenantContext.BranchId.Value);
 
             var invoices = await query.ToListAsync();
 
@@ -206,23 +220,19 @@ namespace POS.Api.Services
 
         public async Task<IEnumerable<InvoiceDto>> GetFilteredInvoicesAsync(InvoiceFilterDto filter)
         {
+            // Enforce strict branch isolation - cannot view invoices without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return Enumerable.Empty<InvoiceDto>();
+            }
+
             var query = _context.Invoices
                 .Include(i => i.Order)
                     .ThenInclude(o => o.Customer)
                 .Include(i => i.Order)
                     .ThenInclude(o => o.OrderProductMaps)
                         .ThenInclude(opm => opm.Product)
-                .AsQueryable();
-
-            // Filter by branch if user has a branch assignment
-            if (_tenantContext.BranchId.HasValue)
-            {
-                query = query.Where(i => i.Order != null && i.Order.BranchId == _tenantContext.BranchId.Value);
-            }
-            else if (_tenantContext.CompanyId.HasValue)
-            {
-                query = query.Where(i => i.Order != null && i.Order.CompanyId == _tenantContext.CompanyId.Value);
-            }
+                .Where(i => i.Order != null && i.Order.BranchId == _tenantContext.BranchId.Value);
 
             // Filter by amount
             if (filter.MinAmount.HasValue)
@@ -316,9 +326,15 @@ namespace POS.Api.Services
 
         public async Task<string> GenerateInvoiceHtmlAsync(int invoiceId)
         {
+            // Enforce strict branch isolation - cannot generate HTML without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                throw new InvalidOperationException("Cannot generate invoice HTML without branch context.");
+            }
+
             var invoice = await GetInvoiceByIdAsync(invoiceId);
             if (invoice == null)
-                throw new ArgumentException("Invoice not found");
+                throw new ArgumentException("Invoice not found in your branch");
 
             var order = await _context.Orders
                 .Include(o => o.OrderProductMaps)
@@ -362,6 +378,12 @@ namespace POS.Api.Services
 
         public async Task<string> GenerateBulkInvoiceHtmlAsync(List<int> invoiceIds)
         {
+            // Enforce strict branch isolation - cannot generate bulk HTML without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                throw new InvalidOperationException("Cannot generate bulk invoice HTML without branch context.");
+            }
+
             if (invoiceIds == null || invoiceIds.Count == 0)
                 throw new ArgumentException("At least one invoice ID is required");
 
@@ -687,8 +709,15 @@ namespace POS.Api.Services
 
         public async Task<bool> UpdateInvoiceStatusByOrderIdAsync(int orderId, string status)
         {
+            // Enforce strict branch isolation - cannot update without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return false;
+            }
+
             var invoice = await _context.Invoices
-                .FirstOrDefaultAsync(i => i.OrderId == orderId);
+                .Include(i => i.Order)
+                .FirstOrDefaultAsync(i => i.OrderId == orderId && i.Order != null && i.Order.BranchId == _tenantContext.BranchId.Value);
 
             if (invoice == null)
                 return false;
@@ -700,9 +729,18 @@ namespace POS.Api.Services
 
         public async Task<InvoicePaymentDto> AddPaymentAsync(int invoiceId, CreateInvoicePaymentDto paymentDto, string receivedBy)
         {
-            var invoice = await _context.Invoices.FindAsync(invoiceId);
+            // Enforce strict branch isolation - cannot add payment without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                throw new InvalidOperationException("Cannot add payment without branch context.");
+            }
+
+            var invoice = await _context.Invoices
+                .Include(i => i.Order)
+                .FirstOrDefaultAsync(i => i.InvoiceId == invoiceId && i.Order != null && i.Order.BranchId == _tenantContext.BranchId.Value);
+            
             if (invoice == null)
-                throw new ArgumentException("Invoice not found");
+                throw new ArgumentException("Invoice not found in your branch");
 
             // Validate payment amount
             if (paymentDto.Amount <= 0)
@@ -764,12 +802,19 @@ namespace POS.Api.Services
 
         public async Task<InvoicePaymentSummaryDto> GetInvoicePaymentsAsync(int invoiceId)
         {
+            // Enforce strict branch isolation - cannot view payments without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                throw new InvalidOperationException("Cannot view invoice payments without branch context.");
+            }
+
             var invoice = await _context.Invoices
                 .Include(i => i.Payments)
-                .FirstOrDefaultAsync(i => i.InvoiceId == invoiceId);
+                .Include(i => i.Order)
+                .FirstOrDefaultAsync(i => i.InvoiceId == invoiceId && i.Order != null && i.Order.BranchId == _tenantContext.BranchId.Value);
 
             if (invoice == null)
-                throw new ArgumentException("Invoice not found");
+                throw new ArgumentException("Invoice not found in your branch");
 
             var payments = invoice.Payments
                 .OrderByDescending(p => p.PaymentDate)
@@ -801,6 +846,22 @@ namespace POS.Api.Services
 
         public async Task<List<InvoicePaymentDto>> GetAllPaymentsAsync(int invoiceId)
         {
+            // Enforce strict branch isolation - cannot view payments without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return new List<InvoicePaymentDto>();
+            }
+
+            // Verify invoice belongs to user's branch
+            var invoiceExists = await _context.Invoices
+                .Include(i => i.Order)
+                .AnyAsync(i => i.InvoiceId == invoiceId && i.Order != null && i.Order.BranchId == _tenantContext.BranchId.Value);
+
+            if (!invoiceExists)
+            {
+                return new List<InvoicePaymentDto>();
+            }
+
             var payments = await _context.InvoicePayments
                 .Where(p => p.InvoiceId == invoiceId)
                 .OrderByDescending(p => p.PaymentDate)
@@ -822,9 +883,19 @@ namespace POS.Api.Services
 
         public async Task<bool> UpdateDueDateAsync(int invoiceId, DateTime dueDate)
         {
-            var invoice = await _context.Invoices.FindAsync(invoiceId);
+            // Enforce strict branch isolation - cannot update without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return false;
+            }
+
+            var invoice = await _context.Invoices
+                .Include(i => i.Order)
+                .FirstOrDefaultAsync(i => i.InvoiceId == invoiceId && i.Order != null && i.Order.BranchId == _tenantContext.BranchId.Value);
+            
             if (invoice == null)
                 return false;
+            
             invoice.DueDate = dueDate;
             await _context.SaveChangesAsync();
             return true;
@@ -832,16 +903,22 @@ namespace POS.Api.Services
 
         public async Task<CreditNoteDto> CreateCreditNoteInvoiceAsync(int returnId)
         {
+            // Enforce strict branch isolation - cannot create credit note without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                throw new InvalidOperationException("Cannot create credit note without branch context.");
+            }
+
             var returnEntity = await _context.Returns
                 .Include(r => r.Invoice)
                     .ThenInclude(i => i!.Order)
                         .ThenInclude(o => o.Customer)
                 .Include(r => r.ReturnItems)
                     .ThenInclude(ri => ri.Product)
-                .FirstOrDefaultAsync(r => r.ReturnId == returnId);
+                .FirstOrDefaultAsync(r => r.ReturnId == returnId && r.BranchId == _tenantContext.BranchId.Value);
 
             if (returnEntity == null)
-                throw new ArgumentException("Return not found");
+                throw new ArgumentException("Return not found in your branch");
 
             if (returnEntity.CreditNoteInvoiceId != null)
                 throw new InvalidOperationException("Credit note already exists for this return");
@@ -902,6 +979,12 @@ namespace POS.Api.Services
 
         public async Task<CreditNoteDto?> GetCreditNoteByReturnIdAsync(int returnId)
         {
+            // Enforce strict branch isolation - cannot view credit note without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return null;
+            }
+
             var returnEntity = await _context.Returns
                 .Include(r => r.CreditNoteInvoice)
                 .Include(r => r.Invoice)
@@ -909,7 +992,7 @@ namespace POS.Api.Services
                         .ThenInclude(o => o.Customer)
                 .Include(r => r.ReturnItems)
                     .ThenInclude(ri => ri.Product)
-                .FirstOrDefaultAsync(r => r.ReturnId == returnId);
+                .FirstOrDefaultAsync(r => r.ReturnId == returnId && r.BranchId == _tenantContext.BranchId.Value);
 
             if (returnEntity == null || returnEntity.CreditNoteInvoice == null)
                 return null;

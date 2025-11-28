@@ -57,7 +57,9 @@ namespace POS.Api.Services
                 JoinDate = user.JoinDate,
                 Birthdate = user.Birthdate,
                 Phone = user.Phone,
-                CurrentCity = user.CurrentCity
+                CurrentCity = user.CurrentCity,
+                CompanyId = user.CompanyId,
+                BranchId = user.BranchId
             };
 
             var token = GenerateJwtToken(userDto, user.CompanyId, user.BranchId);

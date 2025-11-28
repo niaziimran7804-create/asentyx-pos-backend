@@ -26,17 +26,24 @@ namespace POS.Api.Services
             int page = 1,
             int limit = 50)
         {
-            var query = _context.AccountingEntries.AsQueryable();
+            // Enforce strict branch isolation - no branchId means no data
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return new AccountingEntriesResponseDto
+                {
+                    Entries = new List<AccountingEntryDto>(),
+                    Pagination = new PaginationDto
+                    {
+                        Total = 0,
+                        Page = page,
+                        Limit = limit,
+                        TotalPages = 0
+                    }
+                };
+            }
 
-            // Filter by branch if user has a branch assignment
-            if (_tenantContext.BranchId.HasValue)
-            {
-                query = query.Where(e => e.BranchId == _tenantContext.BranchId.Value);
-            }
-            else if (_tenantContext.CompanyId.HasValue)
-            {
-                query = query.Where(e => e.CompanyId == _tenantContext.CompanyId.Value);
-            }
+            var query = _context.AccountingEntries
+                .Where(e => e.BranchId == _tenantContext.BranchId.Value);
 
             if (startDate.HasValue)
                 query = query.Where(e => e.EntryDate >= startDate.Value);
@@ -93,6 +100,12 @@ namespace POS.Api.Services
 
         public async Task<AccountingEntryDto> CreateAccountingEntryAsync(CreateAccountingEntryDto dto, string createdBy)
         {
+            // Enforce strict branch isolation - cannot create without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                throw new InvalidOperationException("Cannot create accounting entry without branch context. User must be assigned to a branch.");
+            }
+
             if (!Enum.TryParse<EntryType>(dto.EntryType, true, out var entryType))
                 throw new ArgumentException("Invalid entry type");
 
@@ -117,7 +130,7 @@ namespace POS.Api.Services
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
                 CompanyId = _tenantContext.CompanyId,
-                BranchId = _tenantContext.BranchId
+                BranchId = _tenantContext.BranchId.Value
             };
 
             _context.AccountingEntries.Add(entry);
@@ -140,15 +153,16 @@ namespace POS.Api.Services
 
         public async Task<bool> DeleteAccountingEntryAsync(int entryId)
         {
-            var entry = await _context.AccountingEntries.FindAsync(entryId);
-            if (entry == null)
+            // Enforce strict branch isolation - cannot delete without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
                 return false;
+            }
 
-            // Verify branch ownership before deletion
-            if (_tenantContext.BranchId.HasValue && entry.BranchId != _tenantContext.BranchId.Value)
-                return false;
+            var entry = await _context.AccountingEntries
+                .FirstOrDefaultAsync(e => e.EntryId == entryId && e.BranchId == _tenantContext.BranchId.Value);
             
-            if (_tenantContext.CompanyId.HasValue && entry.CompanyId != _tenantContext.CompanyId.Value)
+            if (entry == null)
                 return false;
 
             _context.AccountingEntries.Remove(entry);
@@ -158,17 +172,24 @@ namespace POS.Api.Services
 
         public async Task<FinancialSummaryDto> GetFinancialSummaryAsync(DateTime? startDate = null, DateTime? endDate = null)
         {
-            var query = _context.AccountingEntries.AsQueryable();
+            // Enforce strict branch isolation - no branchId means return empty summary
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return new FinancialSummaryDto
+                {
+                    TotalIncome = 0,
+                    TotalExpenses = 0,
+                    TotalRefunds = 0,
+                    NetProfit = 0,
+                    TotalSales = 0,
+                    TotalPurchases = 0,
+                    CashBalance = 0,
+                    Period = "No Data"
+                };
+            }
 
-            // Filter by branch if user has a branch assignment
-            if (_tenantContext.BranchId.HasValue)
-            {
-                query = query.Where(e => e.BranchId == _tenantContext.BranchId.Value);
-            }
-            else if (_tenantContext.CompanyId.HasValue)
-            {
-                query = query.Where(e => e.CompanyId == _tenantContext.CompanyId.Value);
-            }
+            var query = _context.AccountingEntries
+                .Where(e => e.BranchId == _tenantContext.BranchId.Value);
 
             if (startDate.HasValue)
                 query = query.Where(e => e.EntryDate >= startDate.Value);
@@ -228,20 +249,17 @@ namespace POS.Api.Services
 
         public async Task<List<DailySalesDto>> GetDailySalesAsync(int days = 7)
         {
+            // Enforce strict branch isolation - no branchId means return empty list
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return new List<DailySalesDto>();
+            }
+
             var startDate = DateTime.UtcNow.Date.AddDays(-days);
 
             var salesQuery = _context.Orders
-                .Where(o => o.Date >= startDate && (o.OrderStatus == "Completed" || o.OrderStatus == "Paid"));
-
-            // Filter by branch if user has a branch assignment
-            if (_tenantContext.BranchId.HasValue)
-            {
-                salesQuery = salesQuery.Where(o => o.BranchId == _tenantContext.BranchId.Value);
-            }
-            else if (_tenantContext.CompanyId.HasValue)
-            {
-                salesQuery = salesQuery.Where(o => o.CompanyId == _tenantContext.CompanyId.Value);
-            }
+                .Where(o => o.Date >= startDate && (o.OrderStatus == "Completed" || o.OrderStatus == "Paid") &&
+                       o.BranchId == _tenantContext.BranchId.Value);
 
             var salesData = await salesQuery
                 .GroupBy(o => o.Date.Date)
@@ -256,17 +274,8 @@ namespace POS.Api.Services
                 .ToListAsync();
 
             var expensesQuery = _context.AccountingEntries
-                .Where(e => e.EntryDate >= startDate && e.EntryType == EntryType.Expense);
-
-            // Filter by branch if user has a branch assignment
-            if (_tenantContext.BranchId.HasValue)
-            {
-                expensesQuery = expensesQuery.Where(e => e.BranchId == _tenantContext.BranchId.Value);
-            }
-            else if (_tenantContext.CompanyId.HasValue)
-            {
-                expensesQuery = expensesQuery.Where(e => e.CompanyId == _tenantContext.CompanyId.Value);
-            }
+                .Where(e => e.EntryDate >= startDate && e.EntryType == EntryType.Expense &&
+                       e.BranchId == _tenantContext.BranchId.Value);
 
             var expensesData = await expensesQuery
                 .GroupBy(e => e.EntryDate.Date)
@@ -278,17 +287,8 @@ namespace POS.Api.Services
                 .ToListAsync();
 
             var refundsQuery = _context.AccountingEntries
-                .Where(e => e.EntryDate >= startDate && e.EntryType == EntryType.Refund);
-
-            // Filter by branch if user has a branch assignment
-            if (_tenantContext.BranchId.HasValue)
-            {
-                refundsQuery = refundsQuery.Where(e => e.BranchId == _tenantContext.BranchId.Value);
-            }
-            else if (_tenantContext.CompanyId.HasValue)
-            {
-                refundsQuery = refundsQuery.Where(e => e.CompanyId == _tenantContext.CompanyId.Value);
-            }
+                .Where(e => e.EntryDate >= startDate && e.EntryType == EntryType.Refund &&
+                       e.BranchId == _tenantContext.BranchId.Value);
 
             var refundsData = await refundsQuery
                 .GroupBy(e => e.EntryDate.Date)
@@ -332,6 +332,12 @@ namespace POS.Api.Services
 
         public async Task<SalesGraphDto> GetSalesGraphAsync(DateTime startDate, DateTime endDate)
         {
+            // Enforce strict branch isolation - no branchId means return empty graph
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return new SalesGraphDto();
+            }
+
             // Validate date range
             if (startDate > endDate)
                 throw new ArgumentException("startDate cannot be after endDate");
@@ -353,17 +359,8 @@ namespace POS.Api.Services
             // Get sales data
             var salesQueryGraph = _context.Orders
                 .Where(o => o.Date >= startDate && o.Date <= endDate.AddDays(1).AddTicks(-1) && 
-                       (o.OrderStatus == "Completed" || o.OrderStatus == "Paid"));
-
-            // Filter by branch if user has a branch assignment
-            if (_tenantContext.BranchId.HasValue)
-            {
-                salesQueryGraph = salesQueryGraph.Where(o => o.BranchId == _tenantContext.BranchId.Value);
-            }
-            else if (_tenantContext.CompanyId.HasValue)
-            {
-                salesQueryGraph = salesQueryGraph.Where(o => o.CompanyId == _tenantContext.CompanyId.Value);
-            }
+                       (o.OrderStatus == "Completed" || o.OrderStatus == "Paid") &&
+                       o.BranchId == _tenantContext.BranchId.Value);
 
             var salesData = await salesQueryGraph
                 .GroupBy(o => o.Date.Date)
@@ -378,17 +375,8 @@ namespace POS.Api.Services
             // Get expenses data
             var expensesQueryGraph = _context.AccountingEntries
                 .Where(e => e.EntryDate >= startDate && e.EntryDate <= endDate.AddDays(1).AddTicks(-1) && 
-                       e.EntryType == EntryType.Expense);
-
-            // Filter by branch if user has a branch assignment
-            if (_tenantContext.BranchId.HasValue)
-            {
-                expensesQueryGraph = expensesQueryGraph.Where(e => e.BranchId == _tenantContext.BranchId.Value);
-            }
-            else if (_tenantContext.CompanyId.HasValue)
-            {
-                expensesQueryGraph = expensesQueryGraph.Where(e => e.CompanyId == _tenantContext.CompanyId.Value);
-            }
+                       e.EntryType == EntryType.Expense &&
+                       e.BranchId == _tenantContext.BranchId.Value);
 
             var expensesData = await expensesQueryGraph
                 .GroupBy(e => e.EntryDate.Date)
@@ -402,17 +390,8 @@ namespace POS.Api.Services
             // Get refunds data
             var refundsQueryGraph = _context.AccountingEntries
                 .Where(e => e.EntryDate >= startDate && e.EntryDate <= endDate.AddDays(1).AddTicks(-1) && 
-                       e.EntryType == EntryType.Refund);
-
-            // Filter by branch if user has a branch assignment
-            if (_tenantContext.BranchId.HasValue)
-            {
-                refundsQueryGraph = refundsQueryGraph.Where(e => e.BranchId == _tenantContext.BranchId.Value);
-            }
-            else if (_tenantContext.CompanyId.HasValue)
-            {
-                refundsQueryGraph = refundsQueryGraph.Where(e => e.CompanyId == _tenantContext.CompanyId.Value);
-            }
+                       e.EntryType == EntryType.Refund &&
+                       e.BranchId == _tenantContext.BranchId.Value);
 
             var refundsData = await refundsQueryGraph
                 .GroupBy(e => e.EntryDate.Date)
@@ -457,18 +436,15 @@ namespace POS.Api.Services
         public async Task<List<PaymentMethodSummaryDto>> GetPaymentMethodsSummaryAsync(
             DateTime? startDate = null, DateTime? endDate = null)
         {
-            var query = _context.Orders
-                .Where(o => o.OrderStatus == "Completed" || o.OrderStatus == "Paid");
+            // Enforce strict branch isolation - no branchId means return empty list
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return new List<PaymentMethodSummaryDto>();
+            }
 
-            // Filter by branch if user has a branch assignment
-            if (_tenantContext.BranchId.HasValue)
-            {
-                query = query.Where(o => o.BranchId == _tenantContext.BranchId.Value);
-            }
-            else if (_tenantContext.CompanyId.HasValue)
-            {
-                query = query.Where(o => o.CompanyId == _tenantContext.CompanyId.Value);
-            }
+            var query = _context.Orders
+                .Where(o => (o.OrderStatus == "Completed" || o.OrderStatus == "Paid") &&
+                       o.BranchId == _tenantContext.BranchId.Value);
 
             if (startDate.HasValue)
                 query = query.Where(o => o.Date >= startDate.Value);
@@ -496,20 +472,17 @@ namespace POS.Api.Services
         public async Task<List<TopProductDto>> GetTopProductsAsync(
             int limit = 10, DateTime? startDate = null, DateTime? endDate = null)
         {
+            // Enforce strict branch isolation - no branchId means return empty list
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return new List<TopProductDto>();
+            }
+
             var query = _context.OrderProductMaps
                 .Include(opm => opm.Order)
                 .Include(opm => opm.Product)
-                .Where(opm => opm.Order.OrderStatus == "Completed" || opm.Order.OrderStatus == "Paid");
-
-            // Filter by branch if user has a branch assignment
-            if (_tenantContext.BranchId.HasValue)
-            {
-                query = query.Where(opm => opm.Order.BranchId == _tenantContext.BranchId.Value);
-            }
-            else if (_tenantContext.CompanyId.HasValue)
-            {
-                query = query.Where(opm => opm.Order.CompanyId == _tenantContext.CompanyId.Value);
-            }
+                .Where(opm => (opm.Order.OrderStatus == "Completed" || opm.Order.OrderStatus == "Paid") &&
+                       opm.Order.BranchId == _tenantContext.BranchId.Value);
 
             if (startDate.HasValue)
                 query = query.Where(opm => opm.Order.Date >= startDate.Value);
@@ -601,6 +574,12 @@ namespace POS.Api.Services
 
         public async Task CreateExpenseEntryAsync(int expenseId, string createdBy)
         {
+            // Enforce strict branch isolation - cannot create without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                throw new InvalidOperationException("Cannot create expense entry without branch context.");
+            }
+
             var expense = await _context.Expenses.FindAsync(expenseId);
             if (expense == null)
                 return;
@@ -624,7 +603,7 @@ namespace POS.Api.Services
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
                 CompanyId = _tenantContext.CompanyId,
-                BranchId = _tenantContext.BranchId
+                BranchId = _tenantContext.BranchId.Value
             };
 
             _context.AccountingEntries.Add(entry);

@@ -28,21 +28,17 @@ namespace POS.Api.Services
 
         public async Task<IEnumerable<OrderDto>> GetAllOrdersAsync()
         {
+            // Enforce strict branch isolation - no branchId means no data
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return Enumerable.Empty<OrderDto>();
+            }
+
             var query = _context.Orders
                 .Include(o => o.Customer)
                 .Include(o => o.OrderProductMaps)
                     .ThenInclude(opm => opm.Product)
-                .AsQueryable();
-
-            // Filter by branch if user has a branch assignment
-            if (_tenantContext.BranchId.HasValue)
-            {
-                query = query.Where(o => o.BranchId == _tenantContext.BranchId.Value);
-            }
-            else if (_tenantContext.CompanyId.HasValue)
-            {
-                query = query.Where(o => o.CompanyId == _tenantContext.CompanyId.Value);
-            }
+                .Where(o => o.BranchId == _tenantContext.BranchId.Value);
 
             var orders = await query.ToListAsync();
 
@@ -79,11 +75,17 @@ namespace POS.Api.Services
 
         public async Task<OrderDto?> GetOrderByIdAsync(int id)
         {
+            // Enforce strict branch isolation - cannot view order without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return null;
+            }
+
             var order = await _context.Orders
                 .Include(o => o.Customer)
                 .Include(o => o.OrderProductMaps)
                     .ThenInclude(opm => opm.Product)
-                .FirstOrDefaultAsync(o => o.OrderId == id);
+                .FirstOrDefaultAsync(o => o.OrderId == id && o.BranchId == _tenantContext.BranchId.Value);
 
             if (order == null)
                 return null;
@@ -119,6 +121,12 @@ namespace POS.Api.Services
 
         public async Task<OrderDto> CreateOrderAsync(CreateOrderDto createOrderDto)
         {
+            // Enforce strict branch isolation - cannot create order without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                throw new InvalidOperationException("Cannot create order without branch context. User must be assigned to a branch.");
+            }
+
             // Validate items array
             if (createOrderDto.Items == null || createOrderDto.Items.Count == 0)
             {
@@ -211,7 +219,7 @@ namespace POS.Api.Services
                 OrderStatus = "Pending",
                 PaymentMethod = createOrderDto.PaymentMethod,
                 CompanyId = _tenantContext.CompanyId,
-                BranchId = _tenantContext.BranchId
+                BranchId = _tenantContext.BranchId.Value
             };
 
             _context.Orders.Add(order);
@@ -303,7 +311,14 @@ namespace POS.Api.Services
 
         public async Task<bool> UpdateOrderAsync(int id, OrderDto orderDto)
         {
-            var order = await _context.Orders.FindAsync(id);
+            // Enforce strict branch isolation - cannot update without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return false;
+            }
+
+            var order = await _context.Orders
+                .FirstOrDefaultAsync(o => o.OrderId == id && o.BranchId == _tenantContext.BranchId.Value);
             if (order == null)
                 return false;
 
@@ -320,9 +335,15 @@ namespace POS.Api.Services
 
         public async Task<bool> UpdateOrderStatusAsync(int id, UpdateOrderStatusDto updateDto, int userId)
         {
+            // Enforce strict branch isolation - cannot update status without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return false;
+            }
+
             var order = await _context.Orders
                 .Include(o => o.OrderProductMaps)
-                .FirstOrDefaultAsync(o => o.OrderId == id);
+                .FirstOrDefaultAsync(o => o.OrderId == id && o.BranchId == _tenantContext.BranchId.Value);
             
             if (order == null)
                 return false;
@@ -443,6 +464,12 @@ namespace POS.Api.Services
 
         public async Task<int> BulkUpdateOrderStatusAsync(BulkUpdateOrderStatusDto bulkUpdateDto, int userId)
         {
+            // Enforce strict branch isolation - cannot bulk update without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return 0;
+            }
+
             if (bulkUpdateDto.OrderIds == null || bulkUpdateDto.OrderIds.Count == 0)
                 return 0;
 
@@ -455,7 +482,7 @@ namespace POS.Api.Services
 
             var orders = await _context.Orders
                 .Include(o => o.OrderProductMaps)
-                .Where(o => bulkUpdateDto.OrderIds.Contains(o.OrderId))
+                .Where(o => bulkUpdateDto.OrderIds.Contains(o.OrderId) && o.BranchId == _tenantContext.BranchId.Value)
                 .ToListAsync();
 
             // Get user info for accounting entries
@@ -567,7 +594,14 @@ namespace POS.Api.Services
 
         public async Task<bool> DeleteOrderAsync(int id)
         {
-            var order = await _context.Orders.FindAsync(id);
+            // Enforce strict branch isolation - cannot delete without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return false;
+            }
+
+            var order = await _context.Orders
+                .FirstOrDefaultAsync(o => o.OrderId == id && o.BranchId == _tenantContext.BranchId.Value);
             if (order == null)
                 return false;
 

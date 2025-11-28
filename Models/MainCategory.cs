@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace POS.Api.Models
 {
@@ -16,7 +17,17 @@ namespace POS.Api.Models
 
         public byte[]? MainCategoryImage { get; set; }
 
+        // Multi-tenancy columns
+        public int? CompanyId { get; set; }
+        public int? BranchId { get; set; }
+
         // Navigation properties
+        [ForeignKey("CompanyId")]
+        public virtual Company? Company { get; set; }
+
+        [ForeignKey("BranchId")]
+        public virtual Branch? Branch { get; set; }
+
         public virtual ICollection<SecondCategory> SecondCategories { get; set; } = new List<SecondCategory>();
     }
 }

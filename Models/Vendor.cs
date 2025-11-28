@@ -28,9 +28,19 @@ namespace POS.Api.Models
 
         public DateTime RegisterDate { get; set; } = DateTime.UtcNow;
 
+        // Multi-tenancy columns
+        public int? CompanyId { get; set; }
+        public int? BranchId { get; set; }
+
         // Navigation properties
         [ForeignKey("ThirdCategoryId")]
         public virtual ThirdCategory? ThirdCategory { get; set; }
+
+        [ForeignKey("CompanyId")]
+        public virtual Company? Company { get; set; }
+
+        [ForeignKey("BranchId")]
+        public virtual Branch? Branch { get; set; }
 
         public virtual ICollection<Brand> Brands { get; set; } = new List<Brand>();
     }

@@ -26,9 +26,19 @@ namespace POS.Api.Models
 
         public byte[]? BrandImage { get; set; }
 
+        // Multi-tenancy columns
+        public int? CompanyId { get; set; }
+        public int? BranchId { get; set; }
+
         // Navigation properties
         [ForeignKey("VendorId")]
         public virtual Vendor? Vendor { get; set; }
+
+        [ForeignKey("CompanyId")]
+        public virtual Company? Company { get; set; }
+
+        [ForeignKey("BranchId")]
+        public virtual Branch? Branch { get; set; }
 
         public virtual ICollection<Product> Products { get; set; } = new List<Product>();
     }

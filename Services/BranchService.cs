@@ -2,25 +2,37 @@ using Microsoft.EntityFrameworkCore;
 using POS.Api.Data;
 using POS.Api.DTOs;
 using POS.Api.Models;
+using POS.Api.Middleware;
 
 namespace POS.Api.Services
 {
     public class BranchService : IBranchService
     {
         private readonly ApplicationDbContext _context;
+        private readonly TenantContext _tenantContext;
 
-        public BranchService(ApplicationDbContext context)
+        public BranchService(ApplicationDbContext context, TenantContext tenantContext)
         {
             _context = context;
+            _tenantContext = tenantContext;
         }
 
         public async Task<IEnumerable<BranchDto>> GetAllBranchesAsync()
         {
-            var branches = await _context.Branches
+            var query = _context.Branches
                 .Include(b => b.Company)
                 .Include(b => b.Users)
                 .Include(b => b.Products)
-                .ToListAsync();
+                .AsQueryable();
+
+            // Filter by company for Company Admins
+            // Super Admins (no CompanyId) see all branches
+            if (_tenantContext.CompanyId.HasValue)
+            {
+                query = query.Where(b => b.CompanyId == _tenantContext.CompanyId.Value);
+            }
+
+            var branches = await query.ToListAsync();
 
             return branches.Select(b => new BranchDto
             {
@@ -45,6 +57,12 @@ namespace POS.Api.Services
 
         public async Task<IEnumerable<BranchDto>> GetBranchesByCompanyIdAsync(int companyId)
         {
+            // Company Admins can only get branches from their own company
+            if (_tenantContext.CompanyId.HasValue && companyId != _tenantContext.CompanyId.Value)
+            {
+                return Enumerable.Empty<BranchDto>();
+            }
+
             var branches = await _context.Branches
                 .Include(b => b.Company)
                 .Include(b => b.Users)
@@ -75,11 +93,19 @@ namespace POS.Api.Services
 
         public async Task<BranchDto?> GetBranchByIdAsync(int id)
         {
-            var branch = await _context.Branches
+            var query = _context.Branches
                 .Include(b => b.Company)
                 .Include(b => b.Users)
                 .Include(b => b.Products)
-                .FirstOrDefaultAsync(b => b.BranchId == id);
+                .AsQueryable();
+
+            // Filter by company for Company Admins
+            if (_tenantContext.CompanyId.HasValue)
+            {
+                query = query.Where(b => b.CompanyId == _tenantContext.CompanyId.Value);
+            }
+
+            var branch = await query.FirstOrDefaultAsync(b => b.BranchId == id);
 
             if (branch == null)
                 return null;
@@ -107,6 +133,12 @@ namespace POS.Api.Services
 
         public async Task<BranchDto> CreateBranchAsync(CreateBranchDto createBranchDto)
         {
+            // If Company Admin, enforce they can only create branches in their company
+            if (_tenantContext.CompanyId.HasValue && createBranchDto.CompanyId != _tenantContext.CompanyId.Value)
+            {
+                throw new InvalidOperationException("Cannot create branch for another company.");
+            }
+
             var branch = new Branch
             {
                 CompanyId = createBranchDto.CompanyId,
@@ -131,7 +163,15 @@ namespace POS.Api.Services
 
         public async Task<bool> UpdateBranchAsync(int id, UpdateBranchDto updateBranchDto)
         {
-            var branch = await _context.Branches.FindAsync(id);
+            var query = _context.Branches.AsQueryable();
+
+            // Filter by company for Company Admins
+            if (_tenantContext.CompanyId.HasValue)
+            {
+                query = query.Where(b => b.CompanyId == _tenantContext.CompanyId.Value);
+            }
+
+            var branch = await query.FirstOrDefaultAsync(b => b.BranchId == id);
             if (branch == null)
                 return false;
 
@@ -152,7 +192,15 @@ namespace POS.Api.Services
 
         public async Task<bool> DeleteBranchAsync(int id)
         {
-            var branch = await _context.Branches.FindAsync(id);
+            var query = _context.Branches.AsQueryable();
+
+            // Filter by company for Company Admins
+            if (_tenantContext.CompanyId.HasValue)
+            {
+                query = query.Where(b => b.CompanyId == _tenantContext.CompanyId.Value);
+            }
+
+            var branch = await query.FirstOrDefaultAsync(b => b.BranchId == id);
             if (branch == null)
                 return false;
 
@@ -164,7 +212,15 @@ namespace POS.Api.Services
 
         public async Task<bool> BranchExistsAsync(int id)
         {
-            return await _context.Branches.AnyAsync(b => b.BranchId == id);
+            var query = _context.Branches.AsQueryable();
+
+            // Filter by company for Company Admins
+            if (_tenantContext.CompanyId.HasValue)
+            {
+                query = query.Where(b => b.CompanyId == _tenantContext.CompanyId.Value);
+            }
+
+            return await query.AnyAsync(b => b.BranchId == id);
         }
     }
 }

@@ -20,19 +20,15 @@ namespace POS.Api.Services
 
         public async Task<IEnumerable<ProductDto>> GetAllProductsAsync(string? searchKey = null)
         {
+            // Enforce strict branch isolation - no branchId means no data
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return Enumerable.Empty<ProductDto>();
+            }
+
             var query = _context.Products
                 .Include(p => p.Brand)
-                .AsQueryable();
-
-            // Filter by branch if user has a branch assignment
-            if (_tenantContext.BranchId.HasValue)
-            {
-                query = query.Where(p => p.BranchId == _tenantContext.BranchId.Value);
-            }
-            else if (_tenantContext.CompanyId.HasValue)
-            {
-                query = query.Where(p => p.CompanyId == _tenantContext.CompanyId.Value);
-            }
+                .Where(p => p.BranchId == _tenantContext.BranchId.Value);
 
             if (!string.IsNullOrEmpty(searchKey))
             {
@@ -66,9 +62,15 @@ namespace POS.Api.Services
 
         public async Task<ProductDto?> GetProductByIdAsync(int id)
         {
+            // Enforce strict branch isolation - no branchId means no data
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return null;
+            }
+
             var product = await _context.Products
                 .Include(p => p.Brand)
-                .FirstOrDefaultAsync(p => p.ProductId == id);
+                .FirstOrDefaultAsync(p => p.ProductId == id && p.BranchId == _tenantContext.BranchId.Value);
 
             if (product == null)
                 return null;
@@ -95,6 +97,12 @@ namespace POS.Api.Services
 
         public async Task<ProductDto> CreateProductAsync(CreateProductDto createProductDto)
         {
+            // Enforce strict branch isolation - cannot create without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                throw new InvalidOperationException("Cannot create product without branch context. User must be assigned to a branch.");
+            }
+
             var product = new Models.Product
             {
                 ProductIdTag = createProductDto.ProductIdTag,
@@ -113,7 +121,7 @@ namespace POS.Api.Services
                     ? Convert.FromBase64String(createProductDto.ProductImageBase64) 
                     : null,
                 CompanyId = _tenantContext.CompanyId,
-                BranchId = _tenantContext.BranchId
+                BranchId = _tenantContext.BranchId.Value
             };
 
             _context.Products.Add(product);
@@ -124,7 +132,15 @@ namespace POS.Api.Services
 
         public async Task<bool> UpdateProductAsync(int id, UpdateProductDto updateProductDto)
         {
-            var product = await _context.Products.FindAsync(id);
+            // Enforce strict branch isolation - cannot update without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return false;
+            }
+
+            var product = await _context.Products
+                .FirstOrDefaultAsync(p => p.ProductId == id && p.BranchId == _tenantContext.BranchId.Value);
+            
             if (product == null)
                 return false;
 
@@ -152,7 +168,15 @@ namespace POS.Api.Services
 
         public async Task<bool> DeleteProductAsync(int id)
         {
-            var product = await _context.Products.FindAsync(id);
+            // Enforce strict branch isolation - cannot delete without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return false;
+            }
+
+            var product = await _context.Products
+                .FirstOrDefaultAsync(p => p.ProductId == id && p.BranchId == _tenantContext.BranchId.Value);
+            
             if (product == null)
                 return false;
 
@@ -163,22 +187,54 @@ namespace POS.Api.Services
 
         public async Task<int> GetTotalProductsAsync()
         {
-            return await _context.Products.CountAsync();
+            // Enforce strict branch isolation - no branchId means return 0
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return 0;
+            }
+
+            return await _context.Products
+                .Where(p => p.BranchId == _tenantContext.BranchId.Value)
+                .CountAsync();
         }
 
         public async Task<int> GetAvailableProductsAsync()
         {
-            return await _context.Products.CountAsync(p => p.ProductStatus == "YES");
+            // Enforce strict branch isolation - no branchId means return 0
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return 0;
+            }
+
+            return await _context.Products
+                .Where(p => p.BranchId == _tenantContext.BranchId.Value && p.ProductStatus == "YES")
+                .CountAsync();
         }
 
         public async Task<int> GetUnavailableProductsAsync()
         {
-            return await _context.Products.CountAsync(p => p.ProductStatus == "NO");
+            // Enforce strict branch isolation - no branchId means return 0
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return 0;
+            }
+
+            return await _context.Products
+                .Where(p => p.BranchId == _tenantContext.BranchId.Value && p.ProductStatus == "NO")
+                .CountAsync();
         }
 
         public async Task<bool> DeductInventoryAsync(int productId, int quantity)
         {
-            var product = await _context.Products.FindAsync(productId);
+            // Enforce strict branch isolation - cannot deduct without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return false;
+            }
+
+            var product = await _context.Products
+                .FirstOrDefaultAsync(p => p.ProductId == productId && p.BranchId == _tenantContext.BranchId.Value);
+            
             if (product == null)
                 return false;
 
@@ -221,7 +277,15 @@ namespace POS.Api.Services
 
         public async Task<bool> RestoreInventoryAsync(int productId, int quantity)
         {
-            var product = await _context.Products.FindAsync(productId);
+            // Enforce strict branch isolation - cannot restore without branchId
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                return false;
+            }
+
+            var product = await _context.Products
+                .FirstOrDefaultAsync(p => p.ProductId == productId && p.BranchId == _tenantContext.BranchId.Value);
+            
             if (product == null)
                 return false;
 
