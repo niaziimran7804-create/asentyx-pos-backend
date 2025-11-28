@@ -21,6 +21,7 @@ namespace POS.Api.Middleware
 
         public async Task InvokeAsync(HttpContext context, TenantContext tenantContext)
         {
+            // Priority 1: Try to get from JWT claims (authenticated users)
             if (context.User.Identity?.IsAuthenticated == true)
             {
                 var companyIdClaim = context.User.FindFirst("CompanyId");
@@ -40,6 +41,24 @@ namespace POS.Api.Middleware
 
                 tenantContext.UserId = userIdClaim?.Value;
                 tenantContext.Role = roleClaim?.Value;
+            }
+
+            // Priority 2: Fallback to headers (if not set from claims)
+            // This allows overriding or providing tenant context via headers
+            if (!tenantContext.CompanyId.HasValue && context.Request.Headers.TryGetValue("X-Company-Id", out var companyIdHeader))
+            {
+                if (int.TryParse(companyIdHeader.FirstOrDefault(), out var headerCompanyId))
+                {
+                    tenantContext.CompanyId = headerCompanyId;
+                }
+            }
+
+            if (!tenantContext.BranchId.HasValue && context.Request.Headers.TryGetValue("X-Branch-Id", out var branchIdHeader))
+            {
+                if (int.TryParse(branchIdHeader.FirstOrDefault(), out var headerBranchId))
+                {
+                    tenantContext.BranchId = headerBranchId;
+                }
             }
 
             await _next(context);
