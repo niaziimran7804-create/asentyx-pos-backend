@@ -34,7 +34,11 @@ namespace POS.Api.Models
 
         [Required]
         [StringLength(50)]
-        public string Role { get; set; } = "Salesman"; // Admin, Cashier, Salesman
+        public string Role { get; set; } = "Salesman"; // Admin, Cashier, Salesman, CompanyAdmin
+
+        public int? CompanyId { get; set; }
+
+        public int? BranchId { get; set; }
 
         [Column(TypeName = "decimal(18,2)")]
         public decimal Salary { get; set; }
@@ -64,6 +68,12 @@ namespace POS.Api.Models
         public int? PostalCode { get; set; }
 
         // Navigation properties
+        [ForeignKey("CompanyId")]
+        public virtual Company? Company { get; set; }
+
+        [ForeignKey("BranchId")]
+        public virtual Branch? Branch { get; set; }
+
         public virtual ICollection<Order> Orders { get; set; } = new List<Order>();
     }
 }

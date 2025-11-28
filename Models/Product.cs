@@ -8,6 +8,10 @@ namespace POS.Api.Models
         [Key]
         public int ProductId { get; set; }
 
+        public int? CompanyId { get; set; }
+
+        public int? BranchId { get; set; }
+
         [StringLength(100)]
         public string? ProductIdTag { get; set; }
 
@@ -46,6 +50,12 @@ namespace POS.Api.Models
         // Navigation properties
         [ForeignKey("BrandId")]
         public virtual Brand? Brand { get; set; }
+
+        [ForeignKey("CompanyId")]
+        public virtual Company? Company { get; set; }
+
+        [ForeignKey("BranchId")]
+        public virtual Branch? Branch { get; set; }
     }
 }
 

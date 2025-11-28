@@ -20,6 +20,8 @@ namespace POS.Api.DTOs
         public string? Division { get; set; }
         public string? BloodGroup { get; set; }
         public int? PostalCode { get; set; }
+        public int? CompanyId { get; set; }
+        public int? BranchId { get; set; }
     }
 
     public class CreateUserDto
@@ -41,6 +43,8 @@ namespace POS.Api.DTOs
         public string? Division { get; set; }
         public string? BloodGroup { get; set; }
         public int? PostalCode { get; set; }
+        public int? CompanyId { get; set; }
+        public int? BranchId { get; set; }
     }
 
     public class UpdateUserDto

@@ -89,7 +89,9 @@ namespace POS.Api.Services
                 CurrentCity = createUserDto.CurrentCity,
                 Division = createUserDto.Division,
                 BloodGroup = createUserDto.BloodGroup,
-                PostalCode = createUserDto.PostalCode
+                PostalCode = createUserDto.PostalCode,
+                CompanyId = createUserDto.CompanyId,
+                BranchId = createUserDto.BranchId
             };
 
             _context.Users.Add(user);

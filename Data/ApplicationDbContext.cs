@@ -11,6 +11,8 @@ namespace POS.Api.Data
         }
 
         public DbSet<User> Users { get; set; }
+        public DbSet<Company> Companies { get; set; }
+        public DbSet<Branch> Branches { get; set; }
         public DbSet<Product> Products { get; set; }
         public DbSet<Brand> Brands { get; set; }
         public DbSet<Vendor> Vendors { get; set; }
@@ -34,6 +36,50 @@ namespace POS.Api.Data
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+
+            // Company relationships
+            modelBuilder.Entity<Company>()
+                .HasMany(c => c.Branches)
+                .WithOne(b => b.Company)
+                .HasForeignKey(b => b.CompanyId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Company>()
+                .HasMany(c => c.Users)
+                .WithOne(u => u.Company)
+                .HasForeignKey(u => u.CompanyId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Branch relationships
+            modelBuilder.Entity<Branch>()
+                .HasMany(b => b.Users)
+                .WithOne(u => u.Branch)
+                .HasForeignKey(u => u.BranchId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Branch>()
+                .HasMany(b => b.Products)
+                .WithOne(p => p.Branch)
+                .HasForeignKey(p => p.BranchId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Branch>()
+                .HasMany(b => b.Orders)
+                .WithOne(o => o.Branch)
+                .HasForeignKey(o => o.BranchId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Branch>()
+                .HasMany(b => b.Invoices)
+                .WithOne(i => i.Branch)
+                .HasForeignKey(i => i.BranchId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Branch>()
+                .HasMany(b => b.Expenses)
+                .WithOne(e => e.Branch)
+                .HasForeignKey(e => e.BranchId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             // Configure relationships
             modelBuilder.Entity<Product>()

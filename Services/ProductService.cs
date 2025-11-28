@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using POS.Api.Data;
 using POS.Api.DTOs;
+using POS.Api.Middleware;
 
 namespace POS.Api.Services
 {
@@ -8,11 +9,13 @@ namespace POS.Api.Services
     {
         private readonly ApplicationDbContext _context;
         private readonly IEmailService _emailService;
+        private readonly TenantContext _tenantContext;
 
-        public ProductService(ApplicationDbContext context, IEmailService emailService)
+        public ProductService(ApplicationDbContext context, IEmailService emailService, TenantContext tenantContext)
         {
             _context = context;
             _emailService = emailService;
+            _tenantContext = tenantContext;
         }
 
         public async Task<IEnumerable<ProductDto>> GetAllProductsAsync(string? searchKey = null)
@@ -20,6 +23,16 @@ namespace POS.Api.Services
             var query = _context.Products
                 .Include(p => p.Brand)
                 .AsQueryable();
+
+            // Filter by branch if user has a branch assignment
+            if (_tenantContext.BranchId.HasValue)
+            {
+                query = query.Where(p => p.BranchId == _tenantContext.BranchId.Value);
+            }
+            else if (_tenantContext.CompanyId.HasValue)
+            {
+                query = query.Where(p => p.CompanyId == _tenantContext.CompanyId.Value);
+            }
 
             if (!string.IsNullOrEmpty(searchKey))
             {
@@ -98,7 +111,9 @@ namespace POS.Api.Services
                 StockThreshold = createProductDto.StockThreshold,
                 ProductImage = !string.IsNullOrEmpty(createProductDto.ProductImageBase64) 
                     ? Convert.FromBase64String(createProductDto.ProductImageBase64) 
-                    : null
+                    : null,
+                CompanyId = _tenantContext.CompanyId,
+                BranchId = _tenantContext.BranchId
             };
 
             _context.Products.Add(product);

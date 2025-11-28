@@ -8,6 +8,10 @@ namespace POS.Api.Models
         [Key]
         public int LedgerId { get; set; }
 
+        public int? CompanyId { get; set; }
+
+        public int? BranchId { get; set; }
+
         [Required]
         public int CustomerId { get; set; }
 
@@ -65,5 +69,11 @@ namespace POS.Api.Models
 
         [ForeignKey("ReturnId")]
         public virtual Return? Return { get; set; }
+
+        [ForeignKey("CompanyId")]
+        public virtual Company? Company { get; set; }
+
+        [ForeignKey("BranchId")]
+        public virtual Branch? Branch { get; set; }
     }
 }

@@ -5,6 +5,7 @@ using Microsoft.OpenApi.Models;
 using POS.Api.Data;
 using POS.Api.Models;
 using POS.Api.Services;
+using POS.Api.Middleware;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -86,7 +87,12 @@ builder.Services.AddAuthentication(options =>
 
 builder.Services.AddAuthorization();
 
+// Register Tenant Context
+builder.Services.AddScoped<TenantContext>();
+
 // Register Services
+builder.Services.AddScoped<ICompanyService, CompanyService>();
+builder.Services.AddScoped<IBranchService, BranchService>();
 builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<ICategoryService, CategoryService>();
@@ -120,6 +126,10 @@ if (app.Environment.IsDevelopment())
 app.UseSwagger();
 app.UseSwaggerUI();
 app.UseCors("AllowAngularApp");
+
+// Add Tenant Middleware before Authentication
+app.UseMiddleware<TenantMiddleware>();
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();

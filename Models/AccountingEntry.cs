@@ -18,6 +18,10 @@ namespace POS.Api.Models
         [Key]
         public int EntryId { get; set; }
 
+        public int? CompanyId { get; set; }
+
+        public int? BranchId { get; set; }
+
         [Required]
         public EntryType EntryType { get; set; }
 
@@ -45,5 +49,12 @@ namespace POS.Api.Models
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+        // Navigation properties
+        [ForeignKey("CompanyId")]
+        public virtual Company? Company { get; set; }
+
+        [ForeignKey("BranchId")]
+        public virtual Branch? Branch { get; set; }
     }
 }

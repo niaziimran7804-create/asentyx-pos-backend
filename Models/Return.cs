@@ -8,6 +8,10 @@ namespace POS.Api.Models
         [Key]
         public int ReturnId { get; set; }
 
+        public int? CompanyId { get; set; }
+
+        public int? BranchId { get; set; }
+
         [Required]
         [StringLength(20)]
         public string ReturnType { get; set; } = string.Empty; // "whole" or "partial"
@@ -56,6 +60,13 @@ namespace POS.Api.Models
         public virtual Order? Order { get; set; }
         public virtual User? ProcessedByUser { get; set; }
         public virtual Invoice? CreditNoteInvoice { get; set; }
+
+        [ForeignKey("CompanyId")]
+        public virtual Company? Company { get; set; }
+
+        [ForeignKey("BranchId")]
+        public virtual Branch? Branch { get; set; }
+
         public virtual ICollection<ReturnItem> ReturnItems { get; set; } = new List<ReturnItem>();
     }
 }

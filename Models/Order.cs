@@ -8,6 +8,10 @@ namespace POS.Api.Models
         [Key]
         public int OrderId { get; set; }
 
+        public int? CompanyId { get; set; }
+
+        public int? BranchId { get; set; }
+
         [Required]
         public int CustomerId { get; set; } // References User.Id where Role = "Customer"
 
@@ -34,6 +38,12 @@ namespace POS.Api.Models
 
         [ForeignKey("BarCodeId")]
         public virtual BarCode? BarCode { get; set; }
+
+        [ForeignKey("CompanyId")]
+        public virtual Company? Company { get; set; }
+
+        [ForeignKey("BranchId")]
+        public virtual Branch? Branch { get; set; }
 
         public virtual ICollection<OrderProductMap> OrderProductMaps { get; set; } = new List<OrderProductMap>();
     }

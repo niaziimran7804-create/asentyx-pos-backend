@@ -8,6 +8,10 @@ namespace POS.Api.Models
         [Key]
         public int ExpenseId { get; set; }
 
+        public int? CompanyId { get; set; }
+
+        public int? BranchId { get; set; }
+
         [Required]
         [StringLength(255)]
         public string ExpenseName { get; set; } = string.Empty;
@@ -18,6 +22,13 @@ namespace POS.Api.Models
 
         [Required]
         public DateTime ExpenseDate { get; set; } = DateTime.UtcNow;
+
+        // Navigation properties
+        [ForeignKey("CompanyId")]
+        public virtual Company? Company { get; set; }
+
+        [ForeignKey("BranchId")]
+        public virtual Branch? Branch { get; set; }
     }
 }
 

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using POS.Api.Data;
 using POS.Api.DTOs;
 using POS.Api.Models;
+using POS.Api.Middleware;
 
 namespace POS.Api.Services
 {
@@ -12,24 +13,38 @@ namespace POS.Api.Services
         private readonly IAccountingService _accountingService;
         private readonly IProductService _productService;
         private readonly ILedgerService _ledgerService;
+        private readonly TenantContext _tenantContext;
 
         public OrderService(ApplicationDbContext context, IInvoiceService invoiceService, 
-            IAccountingService accountingService, IProductService productService, ILedgerService ledgerService)
+            IAccountingService accountingService, IProductService productService, ILedgerService ledgerService, TenantContext tenantContext)
         {
             _context = context;
             _invoiceService = invoiceService;
             _accountingService = accountingService;
             _productService = productService;
             _ledgerService = ledgerService;
+            _tenantContext = tenantContext;
         }
 
         public async Task<IEnumerable<OrderDto>> GetAllOrdersAsync()
         {
-            var orders = await _context.Orders
+            var query = _context.Orders
                 .Include(o => o.Customer)
                 .Include(o => o.OrderProductMaps)
                     .ThenInclude(opm => opm.Product)
-                .ToListAsync();
+                .AsQueryable();
+
+            // Filter by branch if user has a branch assignment
+            if (_tenantContext.BranchId.HasValue)
+            {
+                query = query.Where(o => o.BranchId == _tenantContext.BranchId.Value);
+            }
+            else if (_tenantContext.CompanyId.HasValue)
+            {
+                query = query.Where(o => o.CompanyId == _tenantContext.CompanyId.Value);
+            }
+
+            var orders = await query.ToListAsync();
 
             var orderIds = orders.Select(o => o.OrderId).ToList();
             var invoices = await _context.Invoices
@@ -194,7 +209,9 @@ namespace POS.Api.Services
                 Status = "Pending",
                 TotalAmount = totalAmount,
                 OrderStatus = "Pending",
-                PaymentMethod = createOrderDto.PaymentMethod
+                PaymentMethod = createOrderDto.PaymentMethod,
+                CompanyId = _tenantContext.CompanyId,
+                BranchId = _tenantContext.BranchId
             };
 
             _context.Orders.Add(order);
