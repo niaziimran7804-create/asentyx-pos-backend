@@ -340,14 +340,14 @@ namespace POS.Api.Services
 
             foreach (var invoice in unpaidInvoices)
             {
-                var daysOld = (reportDate - invoice.InvoiceDate.Date).Days;
+                var daysOverdue = (reportDate - invoice.DueDate.Date).Days;
                 var balance = invoice.Balance;
 
-                if (daysOld <= 30)
+                if (daysOverdue <= 30)
                     aging.Days0To30 += balance;
-                else if (daysOld <= 60)
+                else if (daysOverdue <= 60)
                     aging.Days31To60 += balance;
-                else if (daysOld <= 90)
+                else if (daysOverdue <= 90)
                     aging.Days61To90 += balance;
                 else
                     aging.Days91Plus += balance;
