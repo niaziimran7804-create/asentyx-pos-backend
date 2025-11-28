@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using POS.Api.Data;
 using POS.Api.DTOs;
 using POS.Api.Models;
+using POS.Api.Middleware;
 
 namespace POS.Api.Services
 {
@@ -12,19 +13,22 @@ namespace POS.Api.Services
         private readonly IAccountingService _accountingService;
         private readonly IInvoiceService _invoiceService;
         private readonly ILogger<ReturnService> _logger;
+        private readonly TenantContext _tenantContext;
 
         public ReturnService(
             ApplicationDbContext context,
             IProductService productService,
             IAccountingService accountingService,
             IInvoiceService invoiceService,
-            ILogger<ReturnService> logger)
+            ILogger<ReturnService> logger,
+            TenantContext tenantContext)
         {
             _context = context;
             _productService = productService;
             _accountingService = accountingService;
             _invoiceService = invoiceService;
             _logger = logger;
+            _tenantContext = tenantContext;
         }
 
         public async Task<ReturnDto> CreateWholeReturnAsync(WholeReturnRequest request)
@@ -76,7 +80,13 @@ namespace POS.Api.Services
                     throw new InvalidOperationException("Invalid refund method. Must be 'Cash', 'Card', or 'Store Credit'");
                 }
 
-                // 6. Create return record
+                // 6. Enforce branch isolation
+                if (invoice.Order!.BranchId != _tenantContext.BranchId)
+                {
+                    throw new InvalidOperationException("Cannot create return for invoice from different branch");
+                }
+
+                // 7. Create return record
                 var returnEntity = new Return
                 {
                     ReturnType = "whole",
@@ -88,13 +98,15 @@ namespace POS.Api.Services
                     RefundMethod = request.RefundMethod,
                     Notes = request.Notes,
                     TotalReturnAmount = request.TotalReturnAmount,
+                    CompanyId = _tenantContext.CompanyId,
+                    BranchId = _tenantContext.BranchId,
                     CreatedAt = DateTime.UtcNow
                 };
 
                 _context.Returns.Add(returnEntity);
                 await _context.SaveChangesAsync();
 
-                // 7. Restore inventory for all products in the order
+                // 8. Restore inventory for all products in the order
                 foreach (var orderProduct in invoice.Order!.OrderProductMaps)
                 {
                     await _productService.RestoreInventoryAsync(orderProduct.ProductId, orderProduct.Quantity);
@@ -103,7 +115,7 @@ namespace POS.Api.Services
                         orderProduct.ProductId, orderProduct.Quantity);
                 }
 
-                // 8. Create accounting entry
+                // 9. Create accounting entry
                 var accountingEntry = new CreateAccountingEntryDto
                 {
                     EntryType = "Refund",
@@ -115,6 +127,22 @@ namespace POS.Api.Services
                 };
 
                 await _accountingService.CreateAccountingEntryAsync(accountingEntry, "System");
+
+                // 10. Auto-create credit note invoice for the return
+                try
+                {
+                    var creditNote = await _invoiceService.CreateCreditNoteInvoiceAsync(returnEntity.ReturnId);
+                    _logger.LogInformation(
+                        "Credit note {CreditNoteNumber} automatically created for whole return {ReturnId}",
+                        creditNote.CreditNoteNumber, returnEntity.ReturnId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, 
+                        "Failed to create credit note for return {ReturnId}. Can be created manually later.",
+                        returnEntity.ReturnId);
+                    // Don't fail the entire return if credit note creation fails
+                }
                 
                 await transaction.CommitAsync();
 
@@ -231,7 +259,13 @@ namespace POS.Api.Services
                         $"Total return amount ({request.TotalReturnAmount}) does not match sum of item amounts ({calculatedTotal})");
                 }
 
-                // 7. Create return record
+                // 7. Enforce branch isolation
+                if (invoice.Order!.BranchId != _tenantContext.BranchId)
+                {
+                    throw new InvalidOperationException("Cannot create return for invoice from different branch");
+                }
+
+                // 8. Create return record
                 var returnEntity = new Return
                 {
                     ReturnType = "partial",
@@ -243,13 +277,15 @@ namespace POS.Api.Services
                     RefundMethod = request.RefundMethod,
                     Notes = request.Notes,
                     TotalReturnAmount = request.TotalReturnAmount,
+                    CompanyId = _tenantContext.CompanyId,
+                    BranchId = _tenantContext.BranchId,
                     CreatedAt = DateTime.UtcNow
                 };
 
                 _context.Returns.Add(returnEntity);
                 await _context.SaveChangesAsync();
 
-                // 8. Create return items and update inventory
+                // 9. Create return items and update inventory
                 foreach (var item in request.Items)
                 {
                     var returnItem = new ReturnItem
@@ -288,6 +324,22 @@ namespace POS.Api.Services
                     await _accountingService.CreateAccountingEntryAsync(accountingEntry, "System");
                 }
 
+                // 10. Auto-create credit note invoice for the partial return
+                try
+                {
+                    var creditNote = await _invoiceService.CreateCreditNoteInvoiceAsync(returnEntity.ReturnId);
+                    _logger.LogInformation(
+                        "Credit note {CreditNoteNumber} automatically created for partial return {ReturnId}",
+                        creditNote.CreditNoteNumber, returnEntity.ReturnId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, 
+                        "Failed to create credit note for return {ReturnId}. Can be created manually later.",
+                        returnEntity.ReturnId);
+                    // Don't fail the entire return if credit note creation fails
+                }
+
                 await transaction.CommitAsync();
 
                 _logger.LogInformation(
@@ -307,7 +359,15 @@ namespace POS.Api.Services
 
         public async Task<IEnumerable<ReturnDto>> GetAllReturnsAsync()
         {
+            // Enforce strict branch isolation - no branchId means no data
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                _logger.LogWarning("Attempted to retrieve returns without branch context");
+                return Enumerable.Empty<ReturnDto>();
+            }
+
             var returns = await _context.Returns
+                .Where(r => r.BranchId == _tenantContext.BranchId.Value)
                 .Include(r => r.Invoice)
                 .Include(r => r.Order)
                     .ThenInclude(o => o.Customer)
@@ -318,12 +378,21 @@ namespace POS.Api.Services
                 .OrderByDescending(r => r.ReturnDate)
                 .ToListAsync();
 
+            _logger.LogInformation("Retrieved {Count} returns for branch {BranchId}", returns.Count, _tenantContext.BranchId.Value);
             return returns.Select(MapToDto);
         }
 
         public async Task<ReturnDto?> GetReturnByIdAsync(int id)
         {
+            // Enforce strict branch isolation - no branchId means no data
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                _logger.LogWarning("Attempted to retrieve return {ReturnId} without branch context", id);
+                return null;
+            }
+
             var returnEntity = await _context.Returns
+                .Where(r => r.ReturnId == id && r.BranchId == _tenantContext.BranchId.Value)
                 .Include(r => r.Invoice)
                 .Include(r => r.Order)
                     .ThenInclude(o => o.Customer)
@@ -331,32 +400,74 @@ namespace POS.Api.Services
                 .Include(r => r.CreditNoteInvoice)
                 .Include(r => r.ReturnItems)
                     .ThenInclude(ri => ri.Product)
-                .FirstOrDefaultAsync(r => r.ReturnId == id);
+                .FirstOrDefaultAsync();
+
+            if (returnEntity != null)
+            {
+                _logger.LogInformation("Retrieved return {ReturnId} from branch {BranchId}", id, _tenantContext.BranchId.Value);
+            }
+            else
+            {
+                _logger.LogWarning("Return {ReturnId} not found in branch {BranchId}", id, _tenantContext.BranchId.Value);
+            }
 
             return returnEntity != null ? MapToDto(returnEntity) : null;
         }
 
         public async Task<ReturnSummaryDto> GetReturnSummaryAsync()
         {
-            return new ReturnSummaryDto
+            // Enforce strict branch isolation - no branchId means empty summary
+            if (!_tenantContext.BranchId.HasValue)
             {
-                TotalReturns = await _context.Returns.CountAsync(),
-                PendingReturns = await _context.Returns.CountAsync(r => r.ReturnStatus == "Pending"),
-                ApprovedReturns = await _context.Returns.CountAsync(r => r.ReturnStatus == "Approved"),
-                CompletedReturns = await _context.Returns.CountAsync(r => r.ReturnStatus == "Completed"),
-                TotalReturnAmount = await _context.Returns
+                _logger.LogWarning("Attempted to retrieve return summary without branch context");
+                return new ReturnSummaryDto
+                {
+                    TotalReturns = 0,
+                    PendingReturns = 0,
+                    ApprovedReturns = 0,
+                    CompletedReturns = 0,
+                    TotalReturnAmount = 0,
+                    WholeReturnsCount = 0,
+                    PartialReturnsCount = 0
+                };
+            }
+
+            var branchQuery = _context.Returns.Where(r => r.BranchId == _tenantContext.BranchId.Value);
+
+            var summary = new ReturnSummaryDto
+            {
+                TotalReturns = await branchQuery.CountAsync(),
+                PendingReturns = await branchQuery.CountAsync(r => r.ReturnStatus == "Pending"),
+                ApprovedReturns = await branchQuery.CountAsync(r => r.ReturnStatus == "Approved"),
+                CompletedReturns = await branchQuery.CountAsync(r => r.ReturnStatus == "Completed"),
+                TotalReturnAmount = await branchQuery
                     .Where(r => r.ReturnStatus == "Completed")
                     .SumAsync(r => (decimal?)r.TotalReturnAmount) ?? 0,
-                WholeReturnsCount = await _context.Returns.CountAsync(r => r.ReturnType == "whole"),
-                PartialReturnsCount = await _context.Returns.CountAsync(r => r.ReturnType == "partial")
+                WholeReturnsCount = await branchQuery.CountAsync(r => r.ReturnType == "whole"),
+                PartialReturnsCount = await branchQuery.CountAsync(r => r.ReturnType == "partial")
             };
+
+            _logger.LogInformation("Return summary for branch {BranchId}: {Total} total, {Pending} pending, {Completed} completed",
+                _tenantContext.BranchId.Value, summary.TotalReturns, summary.PendingReturns, summary.CompletedReturns);
+
+            return summary;
         }
 
         public async Task<bool> UpdateReturnStatusAsync(int id, UpdateReturnStatusRequest request, int userId)
         {
-            var returnEntity = await _context.Returns.FindAsync(id);
+            // Enforce strict branch isolation
+            if (!_tenantContext.BranchId.HasValue)
+            {
+                _logger.LogWarning("Attempted to update return {ReturnId} status without branch context", id);
+                return false;
+            }
+
+            var returnEntity = await _context.Returns
+                .FirstOrDefaultAsync(r => r.ReturnId == id && r.BranchId == _tenantContext.BranchId.Value);
+            
             if (returnEntity == null)
             {
+                _logger.LogWarning("Return {ReturnId} not found in branch {BranchId}", id, _tenantContext.BranchId.Value);
                 return false;
             }
 
