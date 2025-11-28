@@ -791,6 +791,16 @@ namespace POS.Api.Services
                 CreatedAt = p.CreatedAt
             }).ToList();
         }
+
+        public async Task<bool> UpdateDueDateAsync(int invoiceId, DateTime dueDate)
+        {
+            var invoice = await _context.Invoices.FindAsync(invoiceId);
+            if (invoice == null)
+                return false;
+            invoice.DueDate = dueDate;
+            await _context.SaveChangesAsync();
+            return true;
+        }
     }
 }
 

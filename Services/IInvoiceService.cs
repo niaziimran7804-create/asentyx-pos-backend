@@ -19,6 +19,9 @@ namespace POS.Api.Services
         Task<InvoicePaymentDto> AddPaymentAsync(int invoiceId, CreateInvoicePaymentDto paymentDto, string receivedBy);
         Task<InvoicePaymentSummaryDto> GetInvoicePaymentsAsync(int invoiceId);
         Task<List<InvoicePaymentDto>> GetAllPaymentsAsync(int invoiceId);
+        
+        // Update due date
+        Task<bool> UpdateDueDateAsync(int invoiceId, DateTime dueDate);
     }
 }
 

@@ -40,5 +40,10 @@ namespace POS.Api.DTOs
         public decimal UnitPrice { get; set; }
         public decimal TotalPrice { get; set; }
     }
+
+    public class UpdateInvoiceDueDateDto
+    {
+        public DateTime DueDate { get; set; }
+    }
 }
 

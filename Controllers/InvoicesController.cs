@@ -225,6 +225,27 @@ namespace POS.Api.Controllers
             var payments = await _invoiceService.GetAllPaymentsAsync(id);
             return Ok(payments);
         }
+
+        /// <summary>
+        /// Update invoice due date
+        /// </summary>
+        [HttpPut("{id}/due-date")]
+        [Authorize(Roles = "Admin")]
+        public async Task<IActionResult> UpdateDueDate(int id, [FromBody] UpdateInvoiceDueDateDto dto)
+        {
+            try
+            {
+                var result = await _invoiceService.UpdateDueDateAsync(id, dto.DueDate);
+                if (!result)
+                    return NotFound(new { message = "Invoice not found" });
+
+                return Ok(new { message = "Invoice due date updated successfully" });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
     }
 }
 
