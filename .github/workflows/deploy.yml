@@ -1,0 +1,40 @@
+name: Deploy .NET 8 App to EC2
+
+on:
+  push:
+    branches:
+      - main  # deploy only on pushes to main branch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1️⃣ Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # 2️⃣ Setup SSH key
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+      # 3️⃣ Add EC2 server to known_hosts
+      - name: Add EC2 host to known_hosts
+        run: ssh-keyscan -H 172.31.40.74 >> ~/.ssh/known_hosts
+
+      # 4️⃣ Deploy application
+      - name: SSH and Deploy
+        run: |
+          ssh -i ~/.ssh/id_rsa ubuntu@172.31.40.74 << 'EOF'
+            set -e  # stop on error
+            cd ~/asentyx-pos-backend
+            git pull origin main
+            # Build and publish .NET 8 app
+            dotnet build -c Release
+            dotnet publish -c Release -o out
+            # Restart PM2 process (replace with your PM2 process name)
+            pm2 restart all || pm2 start out/YourApp.dll --name pos-api
+          EOF
