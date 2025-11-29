@@ -83,7 +83,7 @@ namespace POS.Api.Controllers
             }
         }
 
-        [HttpGet("{id}/print")]
+        [HttpPost("{id}/print")]
         [AllowAnonymous] // Allow anonymous access for printing (invoices are meant to be shareable)
         public async Task<IActionResult> PrintInvoice(int id)
         {
