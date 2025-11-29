@@ -44,8 +44,10 @@ namespace POS.Api.Services
 
             var orderIds = orders.Select(o => o.OrderId).ToList();
             var invoices = await _context.Invoices
-                .Where(i => orderIds.Contains(i.OrderId))
-                .ToDictionaryAsync(i => i.OrderId, i => i.InvoiceId);
+                .Where(i => orderIds.Contains(i.OrderId) && i.InvoiceType != "CreditNote")
+                .GroupBy(i => i.OrderId)
+                .Select(g => new { OrderId = g.Key, InvoiceId = g.First().InvoiceId })
+                .ToDictionaryAsync(x => x.OrderId, x => x.InvoiceId);
 
             return orders.Select(o => new OrderDto
             {
@@ -91,7 +93,8 @@ namespace POS.Api.Services
                 return null;
 
             var invoice = await _context.Invoices
-                .FirstOrDefaultAsync(i => i.OrderId == order.OrderId);
+                .Where(i => i.OrderId == order.OrderId && i.InvoiceType != "CreditNote")
+                .FirstOrDefaultAsync();
 
             return new OrderDto
             {

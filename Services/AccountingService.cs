@@ -188,37 +188,53 @@ namespace POS.Api.Services
                 };
             }
 
-            var query = _context.AccountingEntries
+            // Get accounting entries for income/expenses/refunds
+            var accountingQuery = _context.AccountingEntries
                 .Where(e => e.BranchId == _tenantContext.BranchId.Value);
 
             if (startDate.HasValue)
-                query = query.Where(e => e.EntryDate >= startDate.Value);
+                accountingQuery = accountingQuery.Where(e => e.EntryDate >= startDate.Value);
 
             if (endDate.HasValue)
-                query = query.Where(e => e.EntryDate <= endDate.Value);
+                accountingQuery = accountingQuery.Where(e => e.EntryDate <= endDate.Value);
 
-            var totalIncome = await query
+            // Total Income = Actual cash received (from Income and Sale entries in accounting)
+            var totalIncome = await accountingQuery
                 .Where(e => e.EntryType == EntryType.Income || e.EntryType == EntryType.Sale)
                 .SumAsync(e => (decimal?)e.Amount) ?? 0;
-
-            var totalExpenses = await query
+            var cashInHand = await accountingQuery
+                .Where(e => e.EntryType == EntryType.Income)
+                .SumAsync(e => (decimal?)e.Amount) ?? 0;
+            var totalExpenses = await accountingQuery
                 .Where(e => e.EntryType == EntryType.Expense)
                 .SumAsync(e => (decimal?)e.Amount) ?? 0;
 
-            var totalRefunds = await query
+            var totalRefunds = await accountingQuery
                 .Where(e => e.EntryType == EntryType.Refund)
                 .SumAsync(e => (decimal?)e.Amount) ?? 0;
 
-            var totalSales = await query
-                .Where(e => e.EntryType == EntryType.Sale)
-                .SumAsync(e => (decimal?)e.Amount) ?? 0;
-
-            var totalPurchases = await query
+            var totalPurchases = await accountingQuery
                 .Where(e => e.EntryType == EntryType.Purchase)
                 .SumAsync(e => (decimal?)e.Amount) ?? 0;
 
-            // Net profit = Income - Expenses - Refunds
-            var netProfit = totalIncome - totalExpenses - totalRefunds;
+            // Total Sales = Total order amounts (includes pending/partial payments)
+            var ordersQuery = _context.Orders
+                .Where(o => o.BranchId == _tenantContext.BranchId.Value &&
+                           (o.OrderStatus == "Completed" || o.OrderStatus == "Paid" || o.OrderStatus == "PartiallyPaid"));
+
+            if (startDate.HasValue)
+                ordersQuery = ordersQuery.Where(o => o.Date >= startDate.Value);
+
+            if (endDate.HasValue)
+                ordersQuery = ordersQuery.Where(o => o.Date <= endDate.Value);
+
+            var totalSales = await ordersQuery.SumAsync(o => (decimal?)o.TotalAmount) ?? 0;
+
+            // Cash Balance = Actual cash on hand (Income received - Expenses - Refunds)
+            var cashBalance = cashInHand - totalExpenses - totalRefunds;
+
+            // Net Profit = Business profitability based on total sales (Sales - Expenses - Refunds)
+            var netProfit = totalSales - totalRefunds;
 
             var period = "All Time";
             if (startDate.HasValue && endDate.HasValue)
@@ -236,13 +252,13 @@ namespace POS.Api.Services
 
             return new FinancialSummaryDto
             {
-                TotalIncome = totalIncome,
-                TotalExpenses = totalExpenses,
-                TotalRefunds = totalRefunds,
-                NetProfit = netProfit,
-                TotalSales = totalSales,
-                TotalPurchases = totalPurchases,
-                CashBalance = netProfit,
+                TotalIncome = totalIncome,        // Actual cash received
+                TotalExpenses = totalExpenses,    // Actual expenses
+                TotalRefunds = totalRefunds,      // Actual refunds
+                NetProfit = netProfit,            // Income - Expenses - Refunds
+                TotalSales = totalSales,          // Total order amounts (includes pending)
+                TotalPurchases = totalPurchases,  // Purchases from accounting
+                CashBalance = cashBalance,        // Actual cash on hand
                 Period = period
             };
         }
@@ -257,19 +273,35 @@ namespace POS.Api.Services
 
             var startDate = DateTime.UtcNow.Date.AddDays(-days);
 
-            var salesQuery = _context.Orders
-                .Where(o => o.Date >= startDate && (o.OrderStatus == "Completed" || o.OrderStatus == "Paid") &&
+            // Get order count from Orders table
+            var ordersQuery = _context.Orders
+                .Where(o => o.Date >= startDate && (o.OrderStatus == "Completed" || o.OrderStatus == "Paid" || o.OrderStatus == "PartiallyPaid") &&
                        o.BranchId == _tenantContext.BranchId.Value);
 
-            var salesData = await salesQuery
+            var ordersData = await ordersQuery
                 .GroupBy(o => o.Date.Date)
                 .Select(g => new
                 {
                     Date = g.Key,
-                    TotalSales = g.Sum(o => o.TotalAmount),
                     TotalOrders = g.Count(),
-                    CashSales = g.Where(o => o.PaymentMethod == "Cash").Sum(o => o.TotalAmount),
-                    CardSales = g.Where(o => o.PaymentMethod != "Cash").Sum(o => o.TotalAmount)
+                    TotalSalesAmount = g.Sum(o => o.TotalAmount)
+                })
+                .ToListAsync();
+
+            // Get actual cash received from AccountingEntries (Income only - partial payments)
+            var incomeQuery = _context.AccountingEntries
+                .Where(e => e.EntryDate >= startDate && 
+                       e.EntryType == EntryType.Income &&
+                       e.BranchId == _tenantContext.BranchId.Value);
+
+            var incomeData = await incomeQuery
+                .GroupBy(e => e.EntryDate.Date)
+                .Select(g => new
+                {
+                    Date = g.Key,
+                    TotalIncome = g.Sum(e => e.Amount),
+                    CashIncome = g.Where(e => e.PaymentMethod == "Cash").Sum(e => e.Amount),
+                    CardIncome = g.Where(e => e.PaymentMethod != "Cash" && e.PaymentMethod != null).Sum(e => e.Amount)
                 })
                 .ToListAsync();
 
@@ -304,25 +336,27 @@ namespace POS.Api.Services
             for (int i = 0; i < days; i++)
             {
                 var date = DateTime.UtcNow.Date.AddDays(-i);
-                var sales = salesData.FirstOrDefault(s => s.Date == date);
+                var orders = ordersData.FirstOrDefault(o => o.Date == date);
+                var income = incomeData.FirstOrDefault(s => s.Date == date);
                 var expenses = expensesData.FirstOrDefault(e => e.Date == date);
                 var refunds = refundsData.FirstOrDefault(r => r.Date == date);
 
-                var totalSales = sales?.TotalSales ?? 0;
+                var totalSales = orders?.TotalSalesAmount ?? 0;
+                var totalIncome = income?.TotalIncome ?? 0;
                 var totalExpenses = expenses?.TotalExpenses ?? 0;
                 var totalRefunds = refunds?.TotalRefunds ?? 0;
-                var totalOrders = sales?.TotalOrders ?? 0;
+                var totalOrders = orders?.TotalOrders ?? 0;
 
                 result.Add(new DailySalesDto
                 {
                     Date = date.ToString("yyyy-MM-dd"),
-                    TotalSales = totalSales,
+                    TotalSales = totalSales,  // Total order amounts (includes pending)
                     TotalOrders = totalOrders,
                     TotalExpenses = totalExpenses,
                     TotalRefunds = totalRefunds,
-                    NetProfit = totalSales - totalExpenses - totalRefunds,
-                    CashSales = sales?.CashSales ?? 0,
-                    CardSales = sales?.CardSales ?? 0,
+                    NetProfit = totalSales - totalExpenses - totalRefunds,  // Based on total sales
+                    CashSales = income?.CashIncome ?? 0,  // Actual cash received
+                    CardSales = income?.CardIncome ?? 0,  // Actual card received
                     AverageOrderValue = totalOrders > 0 ? totalSales / totalOrders : 0
                 });
             }
@@ -356,10 +390,10 @@ namespace POS.Api.Services
                 dateRange.Add(date);
             }
 
-            // Get sales data
+            // Get sales data from Orders (includes all orders - pending/partial)
             var salesQueryGraph = _context.Orders
                 .Where(o => o.Date >= startDate && o.Date <= endDate.AddDays(1).AddTicks(-1) && 
-                       (o.OrderStatus == "Completed" || o.OrderStatus == "Paid") &&
+                       (o.OrderStatus == "Completed" || o.OrderStatus == "Paid" || o.OrderStatus == "PartiallyPaid") &&
                        o.BranchId == _tenantContext.BranchId.Value);
 
             var salesData = await salesQueryGraph
@@ -443,7 +477,7 @@ namespace POS.Api.Services
             }
 
             var query = _context.Orders
-                .Where(o => (o.OrderStatus == "Completed" || o.OrderStatus == "Paid") &&
+                .Where(o => (o.OrderStatus == "Completed" || o.OrderStatus == "Paid" || o.OrderStatus == "PartiallyPaid") &&
                        o.BranchId == _tenantContext.BranchId.Value);
 
             if (startDate.HasValue)
@@ -481,7 +515,7 @@ namespace POS.Api.Services
             var query = _context.OrderProductMaps
                 .Include(opm => opm.Order)
                 .Include(opm => opm.Product)
-                .Where(opm => (opm.Order.OrderStatus == "Completed" || opm.Order.OrderStatus == "Paid") &&
+                .Where(opm => (opm.Order.OrderStatus == "Completed" || opm.Order.OrderStatus == "Paid" || opm.Order.OrderStatus == "PartiallyPaid") &&
                        opm.Order.BranchId == _tenantContext.BranchId.Value);
 
             if (startDate.HasValue)

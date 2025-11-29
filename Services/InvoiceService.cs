@@ -777,13 +777,24 @@ namespace POS.Api.Services
             invoice.Balance = invoice.TotalAmount - invoice.AmountPaid;
 
             // Update invoice status
+            string newInvoiceStatus = invoice.Status;
             if (invoice.Balance == 0)
             {
                 invoice.Status = "Paid";
+                newInvoiceStatus = "Paid";
             }
             else if (invoice.AmountPaid > 0 && invoice.Balance > 0)
             {
                 invoice.Status = "PartiallyPaid";
+                newInvoiceStatus = "PartiallyPaid";
+            }
+
+            // Update corresponding order status to match invoice status
+            if (invoice.Order != null)
+            {
+                invoice.Order.Status = newInvoiceStatus;
+                invoice.Order.OrderStatus = newInvoiceStatus;
+                System.Diagnostics.Debug.WriteLine($"Updated Order {invoice.Order.OrderId} status to '{newInvoiceStatus}' based on invoice payment");
             }
 
             await _context.SaveChangesAsync();
