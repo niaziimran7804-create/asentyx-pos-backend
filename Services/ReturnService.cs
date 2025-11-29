@@ -51,20 +51,26 @@ namespace POS.Api.Services
                     throw new InvalidOperationException($"Invoice with ID {request.InvoiceId} not found");
                 }
 
-                // 2. Check 14-day limit
+                // 2. Validate invoice is paid
+                if (invoice.Status != "Paid")
+                {
+                    throw new InvalidOperationException($"Only paid invoices can be returned. Current invoice status: {invoice.Status}");
+                }
+
+                // 3. Check 14-day limit
                 var daysDifference = (DateTime.UtcNow - invoice.InvoiceDate).TotalDays;
                 if (daysDifference > 14)
                 {
                     throw new InvalidOperationException("Invoice is older than 14 days and cannot be returned");
                 }
 
-                // 3. Validate return amount matches invoice total
+                // 4. Validate return amount matches invoice total
                 if (Math.Abs(request.TotalReturnAmount - invoice.TotalAmount) > 0.01m)
                 {
                     throw new InvalidOperationException("Return amount must equal invoice total for whole returns");
                 }
 
-                // 4. Check if already returned
+                // 5. Check if already returned
                 var existingReturn = await _context.Returns
                     .FirstOrDefaultAsync(r => r.InvoiceId == request.InvoiceId && r.ReturnType == "whole");
 
@@ -73,7 +79,7 @@ namespace POS.Api.Services
                     throw new InvalidOperationException("Invoice has already been fully returned");
                 }
 
-                // 5. Validate refund method
+                // 6. Validate refund method
                 var validMethods = new[] { "Cash", "Card", "Store Credit" };
                 if (!validMethods.Contains(request.RefundMethod))
                 {
