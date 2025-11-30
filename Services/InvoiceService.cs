@@ -725,6 +725,23 @@ namespace POS.Api.Services
                 return false;
 
             invoice.Status = status;
+           
+
+            // if order status is paid make payment record
+            var payment = new InvoicePayment
+            {
+                InvoiceId = invoice.InvoiceId,
+                Amount = invoice.Balance,
+                PaymentMethod = "Cash",
+                Notes = "Updated from order page manually",
+                PaymentDate = DateTime.UtcNow,
+                ReceivedBy = "",
+                TransactionReference = "",
+                CreatedAt = DateTime.UtcNow
+            };
+            invoice.AmountPaid = invoice.TotalAmount;
+            invoice.Balance = 0;
+            _context.InvoicePayments.Add(payment);
             await _context.SaveChangesAsync();
             return true;
         }
