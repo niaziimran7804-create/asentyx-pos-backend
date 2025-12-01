@@ -33,5 +33,9 @@
     <None Include="D:\asentyx pos\backend\.editorconfig" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="ReleasesForEc2\" />
+  </ItemGroup>
+
 </Project>
 
