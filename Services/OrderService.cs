@@ -136,40 +136,44 @@ namespace POS.Api.Services
                 throw new InvalidOperationException("Order must contain at least one item");
             }
 
-            // Step 1: Find or create customer in Users table
-            int customerId;
-            User? customer = null;
+            // Pre-validate product IDs exist and have sufficient stock in a single query
+            var productIds = createOrderDto.Items.Select(i => i.ProductId).Distinct().ToList();
+            var products = await _context.Products
+                .Where(p => productIds.Contains(p.ProductId) && p.BranchId == _tenantContext.BranchId.Value)
+                .Select(p => new { p.ProductId, p.ProductUnitStock, p.ProductName })
+                .ToDictionaryAsync(p => p.ProductId);
 
-            // Try to find existing customer by phone first (most reliable)
-            if (!string.IsNullOrWhiteSpace(createOrderDto.CustomerPhone))
+            // Validate all products exist and have sufficient stock
+            foreach (var item in createOrderDto.Items)
             {
-                customer = await _context.Users
-                    .FirstOrDefaultAsync(u => u.Role == "Customer" && u.Phone == createOrderDto.CustomerPhone);
-                
-                if (customer != null)
+                if (!products.ContainsKey(item.ProductId))
                 {
-                    System.Diagnostics.Debug.WriteLine($"Found existing customer by phone: {customer.Id} - {customer.FirstName} {customer.LastName}");
+                    throw new InvalidOperationException($"Product with ID {item.ProductId} not found");
+                }
+                
+                var product = products[item.ProductId];
+                if (product.ProductUnitStock < item.Quantity)
+                {
+                    throw new InvalidOperationException($"Insufficient stock for {product.ProductName}. Available: {product.ProductUnitStock}, Required: {item.Quantity}");
                 }
             }
 
-            // If not found by phone, try email
-            if (customer == null && !string.IsNullOrWhiteSpace(createOrderDto.CustomerEmail))
+            // Step 1: Find or create customer with optimized single query
+            int customerId;
+            User? customer = null;
+
+            if (!string.IsNullOrWhiteSpace(createOrderDto.CustomerPhone) || !string.IsNullOrWhiteSpace(createOrderDto.CustomerEmail))
             {
                 customer = await _context.Users
-                    .FirstOrDefaultAsync(u => u.Role == "Customer" && u.Email == createOrderDto.CustomerEmail);
-                
-                if (customer != null)
-                {
-                    System.Diagnostics.Debug.WriteLine($"Found existing customer by email: {customer.Id} - {customer.FirstName} {customer.LastName}");
-                }
+                    .Where(u => u.Role == "Customer" && 
+                               ((!string.IsNullOrEmpty(createOrderDto.CustomerPhone) && u.Phone == createOrderDto.CustomerPhone) ||
+                                (!string.IsNullOrEmpty(createOrderDto.CustomerEmail) && u.Email == createOrderDto.CustomerEmail)))
+                    .FirstOrDefaultAsync();
             }
 
             // Create new customer if not found
             if (customer == null)
             {
-                System.Diagnostics.Debug.WriteLine($"No existing customer found. Creating new customer for: {createOrderDto.CustomerFullName}");
-                
-                // Ensure we have at least a name
                 if (string.IsNullOrWhiteSpace(createOrderDto.CustomerFullName))
                 {
                     throw new InvalidOperationException("Customer full name is required to create a new order");
@@ -181,7 +185,7 @@ namespace POS.Api.Services
 
                 customer = new User
                 {
-                    UserId = $"CUST_{DateTime.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid().ToString().Substring(0, 8)}",
+                    UserId = $"CUST_{DateTime.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid().ToString()[..8]}",
                     FirstName = firstName,
                     LastName = lastName,
                     Password = "", // Customers don't need login password
@@ -196,17 +200,10 @@ namespace POS.Api.Services
                 };
 
                 _context.Users.Add(customer);
-                await _context.SaveChangesAsync();
-                
-                System.Diagnostics.Debug.WriteLine($"Created new customer: {customer.Id} - {customer.FirstName} {customer.LastName} (Phone: {customer.Phone}, Email: {customer.Email})");
+                // Don't save yet - batch with order creation
             }
 
-            // Ensure we have a valid customer ID
             customerId = customer.Id;
-            if (customerId <= 0)
-            {
-                throw new InvalidOperationException("Failed to create or find customer for order");
-            }
 
             // Step 2: Calculate total amount from items
             var totalAmount = createOrderDto.Items.Sum(item => item.Quantity * item.UnitPrice);
@@ -226,43 +223,23 @@ namespace POS.Api.Services
             };
 
             _context.Orders.Add(order);
-            await _context.SaveChangesAsync();
 
-            System.Diagnostics.Debug.WriteLine($"Created order {order.OrderId} for customer {customerId} with total amount {totalAmount}");
-
-            // Step 4: Add order product maps and deduct inventory
-            foreach (var item in createOrderDto.Items)
+            // Step 4: Batch create all order product maps
+            var orderProductMaps = createOrderDto.Items.Select(item => new Models.OrderProductMap
             {
-                var orderProductMap = new Models.OrderProductMap
-                {
-                    OrderId = order.OrderId,
-                    ProductId = item.ProductId,
-                    Quantity = item.Quantity,
-                    UnitPrice = item.UnitPrice,
-                    TotalPrice = item.Quantity * item.UnitPrice
-                };
-                _context.OrderProductMaps.Add(orderProductMap);
+                Order = order, // EF will resolve the OrderId after SaveChanges
+                ProductId = item.ProductId,
+                Quantity = item.Quantity,
+                UnitPrice = item.UnitPrice,
+                TotalPrice = item.Quantity * item.UnitPrice
+            }).ToList();
 
-                // Deduct inventory when order is created
-                try
-                {
-                    await _productService.DeductInventoryAsync(item.ProductId, item.Quantity);
-                }
-                catch (InvalidOperationException ex)
-                {
-                    // Rollback the order if insufficient stock
-                    _context.Orders.Remove(order);
-                    await _context.SaveChangesAsync();
-                    throw new InvalidOperationException($"Order creation failed: {ex.Message}");
-                }
-            }
+            _context.OrderProductMaps.AddRange(orderProductMaps);
 
-            await _context.SaveChangesAsync();
-
-            // Step 5: Create history entry for order creation
+            // Step 5: Create history entry
             var createHistory = new Models.OrderHistory
             {
-                OrderId = order.OrderId,
+                Order = order, // EF will resolve the OrderId after SaveChanges
                 UserId = customerId,
                 PreviousStatus = null,
                 NewStatus = "Pending",
@@ -274,42 +251,71 @@ namespace POS.Api.Services
             };
             _context.OrderHistories.Add(createHistory);
 
-            // Step 6: Automatically create invoice for the order
-            int? invoiceId = null;
+            // Batch save all changes at once
+            await _context.SaveChangesAsync();
+
+            // Step 6: Batch deduct inventory for all items
+            var inventoryTasks = createOrderDto.Items.Select(item => 
+                _productService.DeductInventoryAsync(item.ProductId, item.Quantity)).ToList();
+
             try
             {
-                var createInvoiceDto = new CreateInvoiceDto
-                {
-                    OrderId = order.OrderId,
-                    DueDate = DateTime.UtcNow.AddDays(30) // Default 30 days payment term
-                };
-                var invoice = await _invoiceService.CreateInvoiceAsync(createInvoiceDto);
-                invoiceId = invoice.InvoiceId;
+                await Task.WhenAll(inventoryTasks);
+            }
+            catch (Exception ex)
+            {
+                // Rollback the order if inventory deduction fails
+                _context.Orders.Remove(order);
+                await _context.SaveChangesAsync();
+                throw new InvalidOperationException($"Order creation failed during inventory deduction: {ex.Message}");
+            }
 
-                // Step 7: Create ledger entry for the sale
+            // Step 7: Create invoice and ledger entry (keep async but don't block order creation)
+            _ = Task.Run(async () =>
+            {
                 try
                 {
+                    var createInvoiceDto = new CreateInvoiceDto
+                    {
+                        OrderId = order.OrderId,
+                        DueDate = DateTime.UtcNow.AddDays(30)
+                    };
+                    var invoice = await _invoiceService.CreateInvoiceAsync(createInvoiceDto);
+
+                    // Create ledger entry
                     await _ledgerService.CreateSaleLedgerEntryAsync(order.OrderId, invoice.InvoiceId, "System");
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Failed to create ledger entry for order {order.OrderId}: {ex.Message}");
+                    System.Diagnostics.Debug.WriteLine($"Failed to create invoice/ledger for order {order.OrderId}: {ex.Message}");
                 }
-            }
-            catch (Exception ex)
-            {
-                // Log the error but don't fail the order creation
-                System.Diagnostics.Debug.WriteLine($"Failed to create invoice for order {order.OrderId}: {ex.Message}");
-            }
+            });
 
-            await _context.SaveChangesAsync();
-
-            var orderDto = await GetOrderByIdAsync(order.OrderId) ?? new OrderDto();
-            if (invoiceId.HasValue)
+            // Return optimized DTO without additional query
+            return new OrderDto
             {
-                orderDto.InvoiceId = invoiceId.Value;
-            }
-            return orderDto;
+                OrderId = order.OrderId,
+                CustomerId = customerId,
+                BarCodeId = order.BarCodeId,
+                Date = order.Date,
+                Status = order.Status,
+                TotalAmount = order.TotalAmount,
+                OrderStatus = order.OrderStatus,
+                PaymentMethod = order.PaymentMethod,
+                CustomerName = $"{customer.FirstName} {customer.LastName}",
+                CustomerPhone = customer.Phone,
+                CustomerEmail = customer.Email,
+                CustomerAddress = customer.CurrentCity,
+                InvoiceId = null, // Invoice creation is async, will be available later
+                Items = orderProductMaps.Select(opm => new OrderItemDetailDto
+                {
+                    ProductId = opm.ProductId,
+                    ProductName = products[opm.ProductId].ProductName,
+                    Quantity = opm.Quantity,
+                    UnitPrice = opm.UnitPrice,
+                    TotalPrice = opm.TotalPrice
+                }).ToList()
+            };
         }
 
         public async Task<bool> UpdateOrderAsync(int id, OrderDto orderDto)

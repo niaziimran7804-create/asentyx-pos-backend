@@ -53,6 +53,7 @@ namespace POS.Api.Controllers
         }
 
         // Main Category CRUD
+        
         [HttpGet("main/{id}")]
         public async Task<ActionResult<MainCategoryDto>> GetMainCategory(int id)
         {
@@ -60,7 +61,8 @@ namespace POS.Api.Controllers
             if (category == null) return NotFound();
             return Ok(category);
         }
-
+        
+        
         [HttpPost("main")]
         [Authorize(Roles = "Admin")]
         public async Task<ActionResult<MainCategoryDto>> CreateMainCategory([FromBody] CreateMainCategoryDto dto)
